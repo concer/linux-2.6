@@ -63,3 +63,9 @@ config IXP4XX_ETH
 	help
 	  Say Y here if you want to use built-in Ethernet ports
 	  on IXP4xx processor.
+
+config WR_MCH_ETH
+       tristate "White Rabbit MCH NIC Support"
+       depends on ARM && ARCH_AT91SAM9263
+       help
+         Say Y if you are compiling for a White Rabbit MCH card.
