@@ -117,9 +117,9 @@ static struct at91_eth_data wr_mch_macb_data __initdata = {
 /*
  * WhiteRabbit NIC (wr-nic) stub
  */
-#define WR_MCH_NIC_BASE	0x2000
-#define WR_MCH_NIC_SIZE	0x200
-#define WR_MCH_NIC_INTR	AT91SAM9263_ID_IRQ0
+#define WR_MCH_FPGA_BASE	0x70000000
+#define WR_MCH_NIC_BASE		(WR_MCH_FPGA_BASE + 0x140000)
+#define WR_MCH_NIC_SIZE		0x40000
 
 static struct resource wr_mch_nic_resources[] = {
 	[0] = {
@@ -128,12 +128,10 @@ static struct resource wr_mch_nic_resources[] = {
 		.flags	= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start	= WR_MCH_NIC_INTR,
-		.end	= WR_MCH_NIC_INTR,
+		.start	= AT91SAM9263_ID_IRQ0,
+		.end	= AT91SAM9263_ID_IRQ0,
 		.flags	= IORESOURCE_IRQ,
 	},
-
-
 };
 
 static u64 wr_mch_nic_dmamask = DMA_BIT_MASK(32);
@@ -258,13 +256,13 @@ static void __init wr_mch_cpu_fpga_init(void)
 		AT91_SMC_NRDSETUP_(4) |
 		AT91_SMC_NCS_RDSETUP_(2));
 	at91_sys_write(AT91_SMC1_PULSE(0),
-		AT91_SMC_NWEPULSE_(20) |
-		AT91_SMC_NCS_WRPULSE_(24) |
-		AT91_SMC_NRDPULSE_(20) |
-		AT91_SMC_NCS_RDPULSE_(24));
+		AT91_SMC_NWEPULSE_(24) |
+		AT91_SMC_NCS_WRPULSE_(28) |
+		AT91_SMC_NRDPULSE_(24) |
+		AT91_SMC_NCS_RDPULSE_(28));
 	at91_sys_write(AT91_SMC1_CYCLE(0),
-		AT91_SMC_NWECYCLE_(30) |
-		AT91_SMC_NRDCYCLE_(30));
+		AT91_SMC_NWECYCLE_(34) |
+		AT91_SMC_NRDCYCLE_(34));
 	at91_sys_write(AT91_SMC1_MODE(0),
 		AT91_SMC_DBW_32 |
 		AT91_SMC_TDF_(0) |
