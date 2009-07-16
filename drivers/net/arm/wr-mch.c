@@ -300,7 +300,7 @@ static int wr_poll(struct napi_struct *napi, int budget)
 	/* if budget not fully consumed, exit the polling mode */
 	if (work_done < budget) {
 		napi_complete(napi);
-		wr_enable_irq(nic, WR_NIC_IER_MASK);
+		wr_enable_irq(nic, WR_NIC_IER_RXI);
 	}
 
 	return work_done;
