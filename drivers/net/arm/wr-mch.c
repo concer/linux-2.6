@@ -36,6 +36,8 @@
 #define WR_NIC_TX_MAX		5
 #define WR_NIC_RX_MAX		10
 #define WR_NIC_RX_DESC_SIZE	128
+#define WR_NIC_TX_MASK		0x7ff
+#define WR_NIC_RX_MASK		0xfff
 
 #define TX_BUFFS_AVAIL(nic)	((nic)->tx_count)
 
@@ -66,15 +68,14 @@ module_param(mac, int, 0);
 MODULE_PARM_DESC(mac, "Mac Address (u32)");
 
 #define wr_readl(wrnic,offs)			\
-	__raw_readl((wrnic)->regs + offs)
+	__raw_readl((wrnic)->regs + (offs))
 
 #define wr_writel(wrnic,offs,value)			\
-	__raw_writel((value), (wrnic)->regs + offs)
+	__raw_writel((value), (wrnic)->regs + (offs))
 
 /*
  * NUXI swapping functions: UNIX -> NUXI
  */
-#if 0 /* when reading nothing needs to be swapped */
 static void
 __wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
 {
@@ -94,27 +95,6 @@ __wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
 		}
 	}
 }
-#else
-static void
-__wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
-{
-	if (unlikely((unsigned long)dst & 0x3)) {
-		while (count--) {
-			struct S { int x __packed; };
-
-			((struct S *)dst)->x = wr_readl(nic, offset);
-                        dst += 4;
-			offset += 4;
-                }
-	} else {
-		while (count--) {
-			*(u32 *)dst = wr_readl(nic, offset);
-			dst += 4;
-			offset += 4;
-		}
-	}
-}
-#endif
 
 static void
 __wr_writesl(struct wrnic *nic, unsigned offset, void *src, unsigned count)
@@ -156,6 +136,7 @@ static void wr_disable_irq(struct wrnic *nic, u32 mask)
 
 	imask &= ~mask;
 	wr_writel(nic, WR_NIC_IER, imask);
+	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 }
 
 static void wr_enable_irq(struct wrnic *nic, u32 mask)
@@ -166,6 +147,7 @@ static void wr_enable_irq(struct wrnic *nic, u32 mask)
 	printk(KERN_ERR "wr_enable_irq() - mask %x IER %x\n", mask, imask);
 
 	wr_writel(nic, WR_NIC_IER, imask);
+	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 }
 
 static void wr_clear_irq(struct wrnic *nic, u32 mask)
@@ -230,10 +212,13 @@ static int wr_rx_frame(struct wrnic *nic)
 	struct sk_buff		*skb;
 	unsigned int	start32	= wr_readl(nic, WR_NIC_RX_DESC_START);
 	unsigned int	start8	= start32 << 2;
-	ssize_t		size8	= wr_readl(nic, WR_NIC_RX_OFFSET + start8);
-	unsigned int	size32	= (size8 >> 2) + !!(size8 & 0x3);
+	/* the NIC returns the size with the MSB first */
+	ssize_t		size8	= wr_readl(nic, WR_NIC_RX_OFFSET + start8) >> 16;
+	unsigned int	size32	= (size8 + 3) >> 2;
+	unsigned int	newhead, end32;
+	char tempbuf[WR_NIC_BUFSIZE];
 
-	dev_info(nic->dev, "%s: grabbing frame\n", __func__);
+	dev_info(nic->dev, "%s: frame size: %d bytes\n", __func__, size8);
 	skb = netdev_alloc_skb(netdev, (size32 << 2) + NET_IP_ALIGN);
 	if (unlikely(skb == NULL)) {
 		if (net_ratelimit())
@@ -246,6 +231,8 @@ static int wr_rx_frame(struct wrnic *nic)
 	/* read size32 double words starting just after the WR header */
 	__wr_readsl(nic, WR_NIC_RX_OFFSET + start8 + 0x10,
 		skb_put(skb, size32 << 2), size32);
+	__wr_readsl(nic, WR_NIC_RX_OFFSET + start8 + 0x10, tempbuf, size32);
+	dump_packet(tempbuf, size8);
 
 	/* determine protocol id */
 	skb->protocol = eth_type_trans(skb, netdev);
@@ -258,20 +245,32 @@ static int wr_rx_frame(struct wrnic *nic)
 	nic->stats.rx_bytes += size32 << 2;
 	netif_receive_skb(skb);
 
-	dump_packet(skb->data, size32);
-
 	/* tell the hardware we've processed the buffer */
 	wmb();
-	wr_writel(nic, WR_NIC_RX_DESC_START, start32 + 4 + size32);
+	newhead = (start32 + 4 + size32) & WR_NIC_RX_MASK;
+	end32 = wr_readl(nic, WR_NIC_RX_DESC_START);
+	wr_writel(nic, WR_NIC_RX_DESC_START, newhead);
 	return 0;
 drop:
 	nic->stats.rx_dropped++;
 	return 1;
 }
 
-static int wr_rx_pending(struct wrnic *nic)
+static bool wr_rx_pending(struct wrnic *nic)
 {
-	return wr_readl(nic, WR_NIC_RX_PENDING);
+	unsigned rxhead, rxtail;
+
+	/*
+	 * NOTE: this is not atomic -> anyway if we miss a packet in between,
+	 * afterwards we'll poll again and fetch it.
+	 */
+	rxhead = wr_readl(nic, WR_NIC_RX_DESC_START) & WR_NIC_RX_MASK;
+	rxtail = wr_readl(nic, WR_NIC_RX_DESC_END) & WR_NIC_RX_MASK;
+	dev_info(nic->dev, "%s: head: 0x%x, tail: 0x%x\n", __func__,
+		rxhead, rxtail);
+	if (rxhead == rxtail ||	rxhead == ((rxtail + 1) & WR_NIC_RX_MASK))
+		return false;
+	return true;
 }
 
 static int wr_rx(struct wrnic *nic, int budget)
@@ -360,6 +359,7 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 
 	/* the interrupt status register is clear-on-write for each bit */
 	wr_clear_irq(nic, WR_NIC_ISR_MASK);
+	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 
 	return IRQ_HANDLED;
 }
@@ -454,18 +454,28 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 	unsigned int txstart, txend;
 	unsigned int crc;
 	unsigned int h8; /* head in bytes */
+	unsigned char my_txbuf[WR_NIC_BUFSIZE];
 
-	crc = ~ether_crc_le(size, data);
+	/*
+	 * @fixme: this copy is superfluous, but this way it's really easy
+	 * to append the CRC
+	 */
+	memcpy(my_txbuf, data, size);
+	crc = ~ether_crc_le(size, my_txbuf);
 
-	txstart = wr_readl(nic, WR_NIC_TX_DESC_START);
-	txend = wr_readl(nic, WR_NIC_TX_DESC_END);
+	my_txbuf[size] = crc & 0xff;
+	my_txbuf[size+1] = (crc >> 8) & 0xff;
+	my_txbuf[size+2] = (crc >> 16) & 0xff;
+	my_txbuf[size+3] = (crc >> 24) & 0xff;
 
+	txstart = wr_readl(nic, WR_NIC_TX_DESC_START) & WR_NIC_TX_MASK;
+	txend = wr_readl(nic, WR_NIC_TX_DESC_END) & WR_NIC_TX_MASK;
 	if (txend != txstart)
-		txend++;
+		txend = (txend + 1) & WR_NIC_TX_MASK;
 	nic->tx_head = txend;
 	h8 = nic->tx_head << 2;
 
-	dev_info(nic->dev, "txstart %08x, txend %08x len=%d, size=%d\n",
+	dev_info(nic->dev, "TX: txstart %08x, txend 0x%08x len=0x%x, size=0x%x\n",
 		txstart, txend,	len, size);
 	dump_packet(data, size);
 	dev_info(nic->dev, "CRC: %08x\n", crc);
@@ -476,13 +486,11 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8, 0);
 
 	/* transfer the payload */
-	__wr_writesl(nic, WR_NIC_TX_OFFSET + h8 + 0xc, data, len);
-
-	/* append the CRC */
-	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 0xc + size, swahb32(crc));
+	__wr_writesl(nic, WR_NIC_TX_OFFSET + h8 + 0xc, my_txbuf, len + 1);
 
 	/* update TX_END: the NIC will start the transfer straightaway */
-	wr_writel(nic, WR_NIC_TX_DESC_END, (nic->tx_head + len + 3) & 0xfff);
+	wr_writel(nic, WR_NIC_TX_DESC_END,
+		(nic->tx_head + len + 4) & WR_NIC_TX_MASK);
 }
 
 static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
