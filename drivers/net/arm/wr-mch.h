@@ -67,9 +67,9 @@
 #define WR_NIC_STAT		0x0010
 #define WR_NIC_STAT_RXOV	BIT(10)	 /* RX overflow. Clear-on-write(1) */
 #define WR_NIC_STAT_RXER	BIT(9)	 /* RX error. Clear-on-write(1) */
-#define WR_NIC_STAT_RXER_CODE	(0xF<<2) /* RX error code from i/f. R/O */
+#define WR_NIC_STAT_RXER_CODE	(0xF<<5) /* RX error code from i/f. R/O */
 #define WR_NIC_STAT_TXER	BIT(4)	 /* TX error. Clear-on-write(1) */
-#define WR_NIC_STAT_TXER_CODE	(0xF<<7) /* TX error code from i/f. R/O */
+#define WR_NIC_STAT_TXER_CODE	(0xF)	/* TX error code from i/f. R/O */
 #define WR_NIC_STAT_MASK	0x07FF
 
 /*
