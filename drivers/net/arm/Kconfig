@@ -66,6 +66,6 @@ config IXP4XX_ETH
 
 config WR_MCH_ETH
        tristate "White Rabbit MCH NIC Support"
-       depends on ARM && ARCH_AT91SAM9263
+       depends on ARCH_AT91SAM9263
        help
          Say Y if you are compiling for a White Rabbit MCH card.
