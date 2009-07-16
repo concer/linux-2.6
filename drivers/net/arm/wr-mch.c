@@ -348,7 +348,7 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 		if (napi_schedule_prep(&nic->napi)) {
 			/* disable the RXI and start polling */
 			wr_disable_irq(nic, WR_NIC_IER_RXI);
-			napi_schedule(&nic->napi);
+			__napi_schedule(&nic->napi);
 		}
 	}
 
