@@ -10,6 +10,7 @@
 
 #include <linux/platform_device.h>
 #include <linux/etherdevice.h>
+#include <linux/net_tstamp.h>
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
 #include <linux/dmapool.h>
@@ -19,6 +20,7 @@
 #include <linux/crc32.h>
 #include <linux/swab.h>
 #include <linux/irq.h>
+#include <linux/if.h>
 
 
 #include "wr-mch.h"
@@ -524,6 +526,34 @@ out:
 	return NETDEV_TX_OK;
 }
 
+static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
+{
+	struct hwtstamp_config	config;
+
+	if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
+		return -EFAULT;
+
+	/* reserver for future extensions of the interface */
+	if (config.flags)
+		return -EFAULT;
+
+	if (config.tx_type == HWTSTAMP_TX_OFF &&
+		config.rx_filter == HWTSTAMP_FILTER_NONE)
+		return 0;
+
+	return -ERANGE;
+}
+
+static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
+{
+	switch (cmd) {
+	case SIOCSHWTSTAMP:
+		return wr_tstamp_ioctl(netdev, rq, cmd);
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
 static void wr_init_tx_ring(struct wrnic *nic)
 {
 	nic->tx_count = 1;
@@ -630,7 +660,7 @@ static const struct net_device_ops wr_netdev_ops = {
 //	.ndo_set_multicast_list	= wr_set_multicast_list,
 //	.ndo_set_mac_address	= wr_set_mac_address,
 //	.ndo_change_mtu		= wr_change_mtu,
-//	.ndo_do_ioctl		= wr_do_ioctl,
+	.ndo_do_ioctl		= wr_ioctl,
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller	= wr_netpoll;
 #endif
