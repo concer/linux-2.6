@@ -427,6 +427,8 @@ static void dump_packet(char *data, unsigned len)
 		if (((++i) % 16) == 0)
 			printk("\n");
 	}
+	if (i % 16)
+		printk("\n");
 }
 
 /*
