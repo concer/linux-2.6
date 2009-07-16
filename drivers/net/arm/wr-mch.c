@@ -417,7 +417,7 @@ static void wr_disable_rxtx(struct wrnic *nic)
 
 static void wr_hw_reset(struct wrnic *nic)
 {
-//	wr_writel(nic, WR_NIC_RST, 1);
+	wr_writel(nic, WR_NIC_RST, 1);
 	udelay(5);
 }
 
