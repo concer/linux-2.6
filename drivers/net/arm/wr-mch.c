@@ -149,12 +149,9 @@ static void wr_enable_irq(struct wrnic *nic, u32 mask)
 {
 	u32 imask = wr_readl(nic, WR_NIC_IER);
 
-	imask &= mask;
+	imask |= mask;
 	printk(KERN_ERR "wr_enable_irq() - mask %x IER %x\n", mask, imask);
 
-	imask = WR_NIC_IER_TXI | WR_NIC_IER_RXI;
-	/* disable RXI for testing */
-//	imask &= ~WR_NIC_IER_RXI;
 	wr_writel(nic, WR_NIC_IER, imask);
 }
 
@@ -209,16 +206,21 @@ static struct net_device_stats *wr_get_stats(struct net_device *netdev)
 	return &nic->stats;
 }
 
+/*
+ * There are three fields in an RX WR header:
+ * ||	size	|	flags	|	OOB	|	tstamp	||
+ * ||	32b	|	32b	|	32b	|	32b	||
+ */
 static int wr_rx_frame(struct wrnic *nic)
 {
-	/* everything in double words (*ugh*) */
 	struct net_device	*netdev = nic->netdev;
 	struct sk_buff		*skb;
-	unsigned int	start	= wr_readl(nic, WR_NIC_RX_DESC_START);
-	ssize_t		octets	= wr_readl(nic, WR_NIC_RX_OFFSET + start);
-	unsigned int	len	= (octets >> 2) + !!(octets & 0x3);
+	unsigned int	start32	= wr_readl(nic, WR_NIC_RX_DESC_START);
+	unsigned int	start8	= start32 << 2;
+	ssize_t		size8	= wr_readl(nic, WR_NIC_RX_OFFSET + start8);
+	unsigned int	size32	= (size8 >> 2) + !!(size8 & 0x3);
 
-	skb = netdev_alloc_skb(netdev, (len << 2) + NET_IP_ALIGN);
+	skb = netdev_alloc_skb(netdev, (size32 << 2) + NET_IP_ALIGN);
 	if (unlikely(skb == NULL)) {
 		if (net_ratelimit())
 			dev_warn(nic->dev, "-ENOMEM - packet dropped\n");
@@ -226,22 +228,25 @@ static int wr_rx_frame(struct wrnic *nic)
 	}
 	/* Make the IP header word-aligned (the ethernet header is 14 bytes) */
 	skb_reserve(skb, NET_IP_ALIGN);
-	__wr_readsl(nic, WR_NIC_RX_OFFSET + start, skb_put(skb, len << 2), len);
+
+	/* read size32 double words starting just after the WR header */
+	__wr_readsl(nic, WR_NIC_RX_OFFSET + start8 + 0x10,
+		skb_put(skb, size32 << 2), size32);
 
 	/* determine protocol id */
 	skb->protocol = eth_type_trans(skb, netdev);
 
-	/* no hardware checksumming support */
-	skb->ip_summed = CHECKSUM_NONE;
+	/* @fixme ignore the checksum for the time being */
+	skb->ip_summed = CHECKSUM_UNNECESSARY;
 
 	netdev->last_rx = jiffies;
 	nic->stats.rx_packets++;
-	nic->stats.rx_bytes += len << 2;
+	nic->stats.rx_bytes += size32 << 2;
 	netif_receive_skb(skb);
 
 	/* tell the hardware we've processed the buffer */
 	wmb();
-	wr_writel(nic, WR_NIC_RX_DESC_START, start + len);
+	wr_writel(nic, WR_NIC_RX_DESC_START, start32 + 4 + size32);
 	return 0;
 drop:
 	nic->stats.rx_dropped++;
@@ -370,7 +375,7 @@ static void wr_netpoll(struct net_device *netdev)
 static void wr_hw_enable_interrupts(struct wrnic *nic)
 {
 	printk(KERN_INFO "%s\n", __func__);
-	wr_writel(nic, WR_NIC_IER, WR_NIC_IER_TXI);
+	wr_writel(nic, WR_NIC_IER, WR_NIC_IER_TXI | WR_NIC_IER_RXI);
 }
 
 static void wr_hw_disable_interrupts(struct wrnic *nic)
@@ -381,9 +386,7 @@ static void wr_hw_disable_interrupts(struct wrnic *nic)
 
 static void wr_enable_rxtx(struct wrnic *nic)
 {
-	/* testing: disable RX */
 	wr_writel(nic, WR_NIC_CTL, WR_NIC_CTL_TX_EN | WR_NIC_CTL_RX_EN);
-//	wr_writel(nic, WR_NIC_CTL, WR_NIC_CTL_TX_EN);
 }
 
 static void wr_disable_rxtx(struct wrnic *nic)
