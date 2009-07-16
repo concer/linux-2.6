@@ -136,6 +136,19 @@ __wr_writesl(struct wrnic *nic, unsigned offset, void *src, unsigned count)
 	}
 }
 
+static void dump_packet(char *data, unsigned len)
+{
+	int i = 0;
+
+	while (len--) {
+		printk("%02x ", (u8)data[i]);
+		if (((++i) % 16) == 0)
+			printk("\n");
+	}
+	if (i % 16)
+		printk("\n");
+}
+
 static void wr_disable_irq(struct wrnic *nic, u32 mask)
 {
 	u32 imask = wr_readl(nic, WR_NIC_IER);
@@ -220,6 +233,7 @@ static int wr_rx_frame(struct wrnic *nic)
 	ssize_t		size8	= wr_readl(nic, WR_NIC_RX_OFFSET + start8);
 	unsigned int	size32	= (size8 >> 2) + !!(size8 & 0x3);
 
+	dev_info(nic->dev, "%s: grabbing frame\n", __func__);
 	skb = netdev_alloc_skb(netdev, (size32 << 2) + NET_IP_ALIGN);
 	if (unlikely(skb == NULL)) {
 		if (net_ratelimit())
@@ -244,6 +258,8 @@ static int wr_rx_frame(struct wrnic *nic)
 	nic->stats.rx_bytes += size32 << 2;
 	netif_receive_skb(skb);
 
+	dump_packet(skb->data, size32);
+
 	/* tell the hardware we've processed the buffer */
 	wmb();
 	wr_writel(nic, WR_NIC_RX_DESC_START, start32 + 4 + size32);
@@ -262,6 +278,9 @@ static int wr_rx(struct wrnic *nic, int budget)
 {
 	int work_done = 0;
 
+	dev_info(nic->dev, "%s\n", __func__);
+	dev_info(nic->dev, "budget: %d, rx_pending: %d\n", budget,
+		wr_rx_pending(nic));
 	while (budget > 0 && wr_rx_pending(nic)) {
 		if (!wr_rx_frame(nic))
 			budget--;
@@ -275,6 +294,7 @@ static int wr_poll(struct napi_struct *napi, int budget)
 	struct wrnic *nic = container_of(napi, struct wrnic, napi);
 	unsigned int work_done = 0;
 
+	dev_info(nic->dev, "%s\n", __func__);
 	work_done = wr_rx(nic, budget);
 
 	/* if budget not fully consumed, exit the polling mode */
@@ -319,7 +339,8 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 		return IRQ_NONE;
 	}
 
-	dev_info(nic->dev, "Interrupt %08x received\n", isr);
+	if (net_ratelimit())
+		dev_info(nic->dev, "Interrupt %08x received\n", isr);
 	if (isr & WR_NIC_ISR_TXI)
 		wr_tx_ack(nic);
 
@@ -416,19 +437,6 @@ static void wr_hw_init(struct wrnic *nic)
 {
 	wr_hw_reset(nic);
 	wr_hw_quiesce(nic);
-}
-
-static void dump_packet(char *data, unsigned len)
-{
-	int i = 0;
-
-	while (len--) {
-		printk("%02x ", (u8)data[i]);
-		if (((++i) % 16) == 0)
-			printk("\n");
-	}
-	if (i % 16)
-		printk("\n");
 }
 
 /*
