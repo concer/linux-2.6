@@ -13,102 +13,342 @@
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
 #include <linux/dmapool.h>
+#include <linux/ethtool.h>
 #include <linux/device.h>
 #include <linux/module.h>
+#include <linux/crc32.h>
+#include <linux/swab.h>
+#include <linux/irq.h>
+
+
+#include "wr-mch.h"
 
 #define DRV_NAME		"wr-mch"
-#define WR_NIC_WATCHDOG_PERIOD	(2 * HZ) /* @todo arbitrary right now */
-#define WR_NIC_NAPI_WEIGHT	16
+#define WR_NIC_TIMEOUT		HZ	/* 1 second */
+#define WR_NIC_NAPI_WEIGHT	10
+#define ETHERMTU		1500
+#define ETHERCRC		4
+#define WR_NIC_BUFSIZE		((ETHERMTU) + 14 + (ETHERCRC) + 2)
+#define WR_NIC_ZLEN		60
+/* note: these should be calculated from the offsets in the header file */
+#define WR_NIC_TX_MAX		5
+#define WR_NIC_RX_MAX		10
+#define WR_NIC_RX_DESC_SIZE	128
 
-#define wr_readl(wrnic,reg)				\
-	__raw_readl((wrnic)->regs + WR_NIC_##reg)
-
-#define wr_writel(wrnic,reg,value)			\
-	__raw_writel((value), (wrnic)->regs + WR_NIC_##reg)
-
-struct rx_desc {
-	u32	start;
-	u32	end;
-};
-
-struct tx_desc {
-	u32	start;
-	u32	end;
-};
+#define TX_BUFFS_AVAIL(nic)	((nic)->tx_count)
 
 struct wrnic {
-	u32		msg_enable;
-	void __iomem	*regs;
+	void __iomem		*regs;
 	spinlock_t		lock;
+	unsigned int		tx_head;
+	unsigned int		tx_count;
 	struct platform_device	*pdev;
+	struct device		*dev;
 	struct net_device	*netdev;
 	struct net_device_stats	stats;
 	struct napi_struct	napi;
-	/* @todo fill this in */
-	struct dma_pool		*rx_pool;
-	struct rx_desc		*rx;
-	struct dma_pool		*tx_pool;
-	struct tx_desc		*tx;
+	u32			msg_enable;
 };
 
-struct wr_buff {
-	struct sk_buff	*skb;
-	dma_addr_t	dma;
-	unsigned long	timestamp;
-	u16		length;
-	u16		next_to_watch;
-};
-
-struct wr_tx_ring {
-	void		*desc;
-	dma_addr_t	dma;
-	unsigned int	size;
-	unsigned int	count;
-	unsigned int	next_to_use;
-	unsigned int	next_to_clean;
-	struct wr_buff	*buffer_info;
-	u16		tdh;
-	u16		tdt;
-	bool last_tx_tso;
-};
-
-
-MODULE_ALIAS("platform:" DRV_NAME);
 MODULE_DESCRIPTION("White Rabbit MCH NIC driver");
 MODULE_AUTHOR("Emilio G. Cota <cota@braap.org>");
 MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:wr-mch");
 
-static int wr_debug __initdata = NETIF_MSG_DRV | NETIF_MSG_PROBE;
-module_param(wr_debug, int, 0);
+static int debug = NETIF_MSG_DRV | NETIF_MSG_PROBE;
+module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 
-static u32 wr_mac __initdata;
-module_param(wr_mac, int, 0);
+static u32 mac;
+module_param(mac, int, 0);
 MODULE_PARM_DESC(mac, "Mac Address (u32)");
 
+#define wr_readl(wrnic,offs)			\
+	__raw_readl((wrnic)->regs + offs)
 
-static irqreturn_t wr_intr(int irq, void *dev_id)
+#define wr_writel(wrnic,offs,value)			\
+	__raw_writel((value), (wrnic)->regs + offs)
+
+/*
+ * NUXI swapping functions: UNIX -> NUXI
+ */
+#if 0 /* when reading nothing needs to be swapped */
+static void
+__wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
 {
-	return IRQ_NONE;
+	if (unlikely((unsigned long)dst & 0x3)) {
+		while (count--) {
+			struct S { int x __packed; };
+
+			((struct S *)dst)->x = swahb32(wr_readl(nic, offset));
+                        dst += 4;
+			offset += 4;
+                }
+	} else {
+		while (count--) {
+			*(u32 *)dst = swahb32(wr_readl(nic, offset));
+			dst += 4;
+			offset += 4;
+		}
+	}
+}
+#else
+static void
+__wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
+{
+	if (unlikely((unsigned long)dst & 0x3)) {
+		while (count--) {
+			struct S { int x __packed; };
+
+			((struct S *)dst)->x = wr_readl(nic, offset);
+                        dst += 4;
+			offset += 4;
+                }
+	} else {
+		while (count--) {
+			*(u32 *)dst = wr_readl(nic, offset);
+			dst += 4;
+			offset += 4;
+		}
+	}
+}
+#endif
+
+static void
+__wr_writesl(struct wrnic *nic, unsigned offset, void *src, unsigned count)
+{
+	if (unlikely((unsigned long)src & 0x3)) {
+		while (count--) {
+			struct S { int x __packed; };
+
+			wr_writel(nic, offset, swahb32(((struct S *)src)->x));
+                        src += 4;
+			offset += 4;
+                }
+	} else {
+		while (count--) {
+			wr_writel(nic, offset, swahb32(*(u32 *)src));
+			src += 4;
+			offset += 4;
+		}
+	}
 }
 
-static int wr_get_settings(struct net_device *netdev, struct ethtool_cmd *cmd)
+static void wr_disable_irq(struct wrnic *nic, u32 mask)
 {
-	struct wrnic *nic = netdev_priv(dev);
+	u32 imask = wr_readl(nic, WR_NIC_IER);
+	printk(KERN_ERR "wr_disable_irq() - mask %x IER %x\n", mask, imask);
+
+	imask &= ~mask;
+	wr_writel(nic, WR_NIC_IER, imask);
+}
+
+static void wr_enable_irq(struct wrnic *nic, u32 mask)
+{
+	u32 imask = wr_readl(nic, WR_NIC_IER);
+
+	imask &= mask;
+	printk(KERN_ERR "wr_enable_irq() - mask %x IER %x\n", mask, imask);
+
+	imask = WR_NIC_IER_TXI | WR_NIC_IER_RXI;
+	/* disable RXI for testing */
+//	imask &= ~WR_NIC_IER_RXI;
+	wr_writel(nic, WR_NIC_IER, imask);
+}
+
+static void wr_clear_irq(struct wrnic *nic, u32 mask)
+{
+	wr_writel(nic, WR_NIC_ISR, mask);
+}
+
+static int wr_update_tx_stats(struct wrnic *nic)
+{
+	u32 statsreg = wr_readl(nic, WR_NIC_STAT);
+	int ret = 0;
+
+	/* @todo: interpret i/f error codes */
+	if (statsreg & WR_NIC_STAT_TXER) {
+		dev_err(nic->dev, "TX: error detected\n");
+		ret++;
+	}
+	/* clear the errors */
+	wr_writel(nic, WR_NIC_STAT, WR_NIC_STAT_TXER);
+	nic->stats.tx_errors += ret;
+	return ret;
+}
+
+static int wr_update_rx_stats(struct wrnic *nic)
+{
+	u32 statsreg = wr_readl(nic, WR_NIC_STAT);
+	int ret = 0;
+
+	/* @todo: interpret i/f error codes */
+	if (statsreg & WR_NIC_STAT_RXER) {
+		dev_err(nic->dev, "RX: error detected\n");
+		ret++;
+	}
+	if (statsreg & WR_NIC_STAT_RXOV) {
+		dev_err(nic->dev, "RX: overflow detected\n");
+		nic->stats.rx_over_errors++;
+		ret++;
+	}
+	/* clear them all */
+	wr_writel(nic, WR_NIC_STAT, WR_NIC_STAT_RXOV | WR_NIC_STAT_RXER);
+	nic->stats.rx_errors += ret;
+	return ret;
+}
+
+static struct net_device_stats *wr_get_stats(struct net_device *netdev)
+{
+	struct wrnic *nic = netdev_priv(netdev);
+
+	wr_update_tx_stats(nic);
+	wr_update_rx_stats(nic);
+	return &nic->stats;
+}
+
+static int wr_rx_frame(struct wrnic *nic)
+{
+	/* everything in double words (*ugh*) */
+	struct net_device	*netdev = nic->netdev;
+	struct sk_buff		*skb;
+	unsigned int	start	= wr_readl(nic, WR_NIC_RX_DESC_START);
+	ssize_t		octets	= wr_readl(nic, WR_NIC_RX_OFFSET + start);
+	unsigned int	len	= (octets >> 2) + !!(octets & 0x3);
+
+	skb = netdev_alloc_skb(netdev, (len << 2) + NET_IP_ALIGN);
+	if (unlikely(skb == NULL)) {
+		if (net_ratelimit())
+			dev_warn(nic->dev, "-ENOMEM - packet dropped\n");
+		goto drop;
+	}
+	/* Make the IP header word-aligned (the ethernet header is 14 bytes) */
+	skb_reserve(skb, NET_IP_ALIGN);
+	__wr_readsl(nic, WR_NIC_RX_OFFSET + start, skb_put(skb, len << 2), len);
+
+	/* determine protocol id */
+	skb->protocol = eth_type_trans(skb, netdev);
+
+	/* no hardware checksumming support */
+	skb->ip_summed = CHECKSUM_NONE;
+
+	netdev->last_rx = jiffies;
+	nic->stats.rx_packets++;
+	nic->stats.rx_bytes += len << 2;
+	netif_receive_skb(skb);
+
+	/* tell the hardware we've processed the buffer */
+	wmb();
+	wr_writel(nic, WR_NIC_RX_DESC_START, start + len);
+	return 0;
+drop:
+	nic->stats.rx_dropped++;
+	return 1;
+}
+
+static int wr_rx_pending(struct wrnic *nic)
+{
+	return wr_readl(nic, WR_NIC_RX_PENDING);
+}
+
+static int wr_rx(struct wrnic *nic, int budget)
+{
+	int work_done = 0;
+
+	while (budget > 0 && wr_rx_pending(nic)) {
+		if (!wr_rx_frame(nic))
+			budget--;
+		work_done++;
+	}
+	return work_done;
+}
+
+static int wr_poll(struct napi_struct *napi, int budget)
+{
+	struct wrnic *nic = container_of(napi, struct wrnic, napi);
+	unsigned int work_done = 0;
+
+	work_done = wr_rx(nic, budget);
+
+	/* if budget not fully consumed, exit the polling mode */
+	if (work_done < budget) {
+		napi_complete(napi);
+		wr_enable_irq(nic, WR_NIC_IER_MASK);
+	}
+
+	return work_done;
+}
+
+static inline void wr_tx_ack(struct wrnic *nic)
+{
+	struct net_device *netdev = nic->netdev;
+	unsigned long flags;
+
+	spin_lock_irqsave(&nic->lock, flags);
+
+	nic->tx_count++;
+	mb();
+	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
+	if (netif_queue_stopped(nic->netdev) && TX_BUFFS_AVAIL(nic) > 0)
+		netif_wake_queue(netdev);
+
+	spin_unlock_irqrestore(&nic->lock, flags);
+}
+
+static unsigned int isr_counter;
+static irqreturn_t wr_interrupt(int irq, void *dev_id)
+{
+	struct net_device *netdev = dev_id;
+	struct wrnic *nic = netdev_priv(netdev);
+	u32 isr;
+
+	isr = wr_readl(nic, WR_NIC_ISR);
+	if (unlikely(!isr)) {
+		++isr_counter;
+//		if (net_ratelimit())
+//			dev_warn(nic->dev, "spurious ISR -- count=%08d", isr_counter);
+		if (isr_counter % 100 == 0)
+			printk(KERN_ERR "spurious ISR -- count=%d\n", isr_counter);
+		return IRQ_NONE;
+	}
+
+	dev_info(nic->dev, "Interrupt %08x received\n", isr);
+	if (isr & WR_NIC_ISR_TXI)
+		wr_tx_ack(nic);
+
+	if (isr & WR_NIC_ISR_RXI) {
+		if (napi_schedule_prep(&nic->napi)) {
+			/* disable the RXI and start polling */
+			wr_disable_irq(nic, WR_NIC_IER_RXI);
+			napi_schedule(&nic->napi);
+		}
+	}
+
+	if (isr & WR_NIC_ISR_TXERR)
+		netdev->stats.tx_errors++;
+
+	if (isr & WR_NIC_ISR_RXERR)
+		netdev->stats.rx_errors++;
+
+	/* the interrupt status register is clear-on-write for each bit */
+	wr_clear_irq(nic, WR_NIC_ISR_MASK);
+
+	return IRQ_HANDLED;
 }
 
 static void __devinit wr_get_mac_addr(struct wrnic *nic)
 {
-	u8	addr[6];
+	u8 addr[6];
+	int i;
 
-	if (wr_mac) {
+	if (mac) {
 		addr[0] = 0xff;
 		addr[1] = 0x00;
 		for (i = 0; i < 4; i ++)
-			addr[i + 2] = (wr_mac >> i) & 0xff;
+			addr[i + 2] = (mac >> i) & 0xff;
 	}
 
-	if (!wr_mac || !is_valid_ether_addr(addr))
+	if (!mac || !is_valid_ether_addr(addr))
 		random_ether_addr(addr);
 	memcpy(nic->netdev->dev_addr, addr, sizeof(addr));
 }
@@ -125,31 +365,46 @@ static void wr_netpoll(struct net_device *netdev)
 }
 #endif
 
-static void wr_hw_enable_intr(struct wrnic *nic)
+static void wr_hw_enable_interrupts(struct wrnic *nic)
 {
-	wr_writel(nic, IER, WR_NIC_IER_TXI | WR_NIC_IER_RXI);
+	printk(KERN_INFO "%s\n", __func__);
+	wr_writel(nic, WR_NIC_IER, WR_NIC_IER_TXI);
 }
 
-static void wr_hw_enable_rxtx(struct wrnic *nic)
+static void wr_hw_disable_interrupts(struct wrnic *nic)
 {
-	wr_writel(nic, CTL, WR_NIC_CTL_TX_EN | WR_NIC_CTL_RX_EN);
+	wr_writel(nic, WR_NIC_IER, 0);
+
 }
 
-static void wr_reset_hw(struct wrnic *nic)
+static void wr_enable_rxtx(struct wrnic *nic)
 {
-	wr_writel(nic, RST, 1);
+	/* testing: disable RX */
+	wr_writel(nic, WR_NIC_CTL, WR_NIC_CTL_TX_EN | WR_NIC_CTL_RX_EN);
+//	wr_writel(nic, WR_NIC_CTL, WR_NIC_CTL_TX_EN);
 }
 
-static void wr_hw_quiesce(struct wrnic *nic);
+static void wr_disable_rxtx(struct wrnic *nic)
+{
+	wr_writel(nic, WR_NIC_CTL, 0);
+}
+
+static void wr_hw_reset(struct wrnic *nic)
+{
+//	wr_writel(nic, WR_NIC_RST, 1);
+	udelay(5);
+}
+
+static void wr_hw_quiesce(struct wrnic *nic)
 {
 	/* disable TX, RX */
-	wr_writel(nic, CTL, 0);
+	wr_writel(nic, WR_NIC_CTL, 0);
 
 	/* clear status register */
-	wr_writel(nic, STAT, 0);
+	wr_writel(nic, WR_NIC_STAT, 0);
 
 	/* disable interrupts */
-	wr_writel(nic, IER, 0);
+	wr_writel(nic, WR_NIC_IER, 0);
 }
 
 static void wr_hw_init(struct wrnic *nic)
@@ -158,61 +413,258 @@ static void wr_hw_init(struct wrnic *nic)
 	wr_hw_quiesce(nic);
 }
 
+static void dump_packet(char *data, unsigned len)
+{
+	int i = 0;
+
+	while (len--) {
+		printk("%02x ", (u8)data[i]);
+		if (((++i) % 16) == 0)
+			printk("\n");
+	}
+}
+
+/*
+ * There are three fields in a TX WR header:
+ * ||	size	|	flags	|	OOB	||
+ * ||	32b	|	32b	|	32b	||
+ *
+ * NOTE: the CRC for the packet is appended in software--this will
+ * be done in hardware soon.
+ */
+static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
+{
+	/* len is in double words (32bits) and doesn't include the CRC */
+	unsigned int len = (size >> 2) + !!(size & 0x3);
+	unsigned int txstart, txend;
+	unsigned int crc;
+	unsigned int h8; /* head in bytes */
+
+	crc = ~ether_crc_le(size, data);
+
+	txstart = wr_readl(nic, WR_NIC_TX_DESC_START);
+	txend = wr_readl(nic, WR_NIC_TX_DESC_END);
+
+	if (txend != txstart)
+		txend++;
+	nic->tx_head = txend;
+	h8 = nic->tx_head << 2;
+
+	dev_info(nic->dev, "txstart %08x, txend %08x len=%d, size=%d\n",
+		txstart, txend,	len, size);
+	dump_packet(data, size);
+	dev_info(nic->dev, "CRC: %08x\n", crc);
+
+	/* fill in WR headers: flags and OOB are set to 0 for the time being */
+	wr_writel(nic, WR_NIC_TX_OFFSET + h8, size + 4);
+	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 4, 0);
+	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8, 0);
+
+	/* transfer the payload */
+	__wr_writesl(nic, WR_NIC_TX_OFFSET + h8 + 0xc, data, len);
+
+	/* append the CRC */
+	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 0xc + size, swahb32(crc));
+
+	/* update TX_END: the NIC will start the transfer straightaway */
+	wr_writel(nic, WR_NIC_TX_DESC_END, (nic->tx_head + len + 3) & 0xfff);
+}
+
+static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
+{
+	struct wrnic *nic = netdev_priv(netdev);
+	char shortpkt[WR_NIC_ZLEN];
+	char *data;
+	unsigned len;
+
+	printk(KERN_INFO "wr_start_xmit: len %d\n", skb->len);
+
+	if (unlikely(skb->len > WR_NIC_BUFSIZE)) {
+		nic->stats.tx_errors++;
+		return -EMSGSIZE;
+	}
+
+	data = skb->data;
+	len = skb->len;
+	if (skb->len < WR_NIC_ZLEN) {
+		memset(shortpkt, 0, WR_NIC_ZLEN);
+		memcpy(shortpkt, skb->data, skb->len);
+		data = shortpkt;
+		len = WR_NIC_ZLEN;
+	}
+
+	spin_lock_irq(&nic->lock);
+	if (TX_BUFFS_AVAIL(nic) <= 0) {
+		netif_stop_queue(netdev);
+		spin_unlock_irq(&nic->lock);
+		dev_err(&netdev->dev, "BUG: Tx Ring full when queue awake\n");
+		return 1;
+	}
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		if (skb_checksum_help(skb)) {
+			dev_warn(nic->dev, "packet checksum failed\n");
+			goto out;
+		}
+	}
+
+	dev_info(nic->dev, "%s: len %d\n", __func__, len);
+
+	__wr_hw_tx(nic, data, len);
+	nic->tx_count--;
+	nic->stats.tx_packets++;
+	nic->stats.tx_bytes += len;
+
+	if (!TX_BUFFS_AVAIL(nic))
+		netif_stop_queue(netdev);
+
+	netdev->trans_start = jiffies;
+out:
+	dev_kfree_skb(skb);
+	spin_unlock_irq(&nic->lock);
+	return NETDEV_TX_OK;
+}
+
+static void wr_init_tx_ring(struct wrnic *nic)
+{
+	nic->tx_count = 1;
+}
+
+static void wr_init_rx_ring(struct wrnic *nic)
+{ }
+
+static void print_silly_test(struct wrnic *nic)
+{
+	u32 reg;
+
+	reg = wr_readl(nic, WR_NIC_CTL);
+	dev_info(nic->dev, "Control register: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_IER);
+	dev_info(nic->dev, "Interrupt Enable register: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_ISR);
+	dev_info(nic->dev, "Interrupt Status register: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_STAT);
+	dev_info(nic->dev, "Status register: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_TX_DESC_START);
+	dev_info(nic->dev, "TX desc start: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_TX_DESC_END);
+	dev_info(nic->dev, "TX desc end: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_RX_DESC_END);
+	dev_info(nic->dev, "RX desc end: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_RX_DESC_END);
+	dev_info(nic->dev, "RX desc end: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_TX_DESC_END);
+	dev_info(nic->dev, "TX desc end: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_TX_OFFSET);
+	dev_info(nic->dev, "TX offset: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_RX_OFFSET);
+	dev_info(nic->dev, "RX offset: 0x%08x\n", reg);
+	reg = wr_readl(nic, WR_NIC_RX_PENDING);
+	dev_info(nic->dev, "RX pending: 0x%08x\n", reg);
+}
+
 static int wr_open(struct net_device *netdev)
 {
 	struct wrnic *nic = netdev_priv(netdev);
+
+	printk(KERN_INFO "wr_open\n");
 
 	if (!is_valid_ether_addr(netdev->dev_addr))
 		return -EADDRNOTAVAIL;
 
 	wr_hw_init(nic);
-	wr_hw_enable_rxtx(nic);
+	wr_enable_rxtx(nic);
+	wr_hw_enable_interrupts(nic);
 
-	netif_wake_queue(nic->netdev);
+	wr_init_tx_ring(nic);
+	wr_init_rx_ring(nic);
+
+	if (netif_queue_stopped(nic->netdev)) {
+		dev_dbg(nic->dev, " resuming queue\n");
+		netif_wake_queue(netdev);
+	} else {
+		dev_dbg(nic->dev, " starting queue\n");
+		netif_start_queue(netdev);
+	}
 	napi_enable(&nic->napi);
 
-	wr_hw_enable_intr(nic);
+	print_silly_test(nic);
+	dev_info(nic->dev, "wr_open done\n");
+
+	return 0;
+}
+
+static int wr_close(struct net_device *netdev)
+{
+	struct wrnic *nic = netdev_priv(netdev);
+
+	/* disable device, etc */
+	/* beep beep beep */
+
+	dev_info(nic->dev, "%s\n", __func__);
+
+	napi_disable(&nic->napi);
+	if (!netif_queue_stopped(netdev))
+		netif_stop_queue(netdev);
+
+	wr_hw_disable_interrupts(nic);
+	wr_disable_rxtx(nic);
+
+	dev_info(nic->dev, "wr_close() done\n");
+
 	return 0;
 }
 
 static const struct ethtool_ops wr_ethtool_ops = {
-	.get_settings		= wr_get_settings,
-	.set_settings		= wr_set_settings,
-	.get_drvinfo		= wr_get_drvinfo,
-	.get_link		= wr_get_link,
+//	.get_settings		= wr_get_settings,
+//	.set_settings		= wr_set_settings,
+//	.get_drvinfo		= wr_get_drvinfo,
+//	.get_link		= wr_get_link,
+};
+
+static const struct net_device_ops wr_netdev_ops = {
+	.ndo_open		= wr_open,
+	.ndo_stop		= wr_close,
+	.ndo_start_xmit		= wr_start_xmit,
+	.ndo_validate_addr	= eth_validate_addr,
+	.ndo_get_stats		= wr_get_stats,
+//	.ndo_set_multicast_list	= wr_set_multicast_list,
+//	.ndo_set_mac_address	= wr_set_mac_address,
+//	.ndo_change_mtu		= wr_change_mtu,
+//	.ndo_do_ioctl		= wr_do_ioctl,
+#ifdef CONFIG_NET_POLL_CONTROLLER
+	.ndo_poll_controller	= wr_netpoll;
+#endif
 };
 
 static int __devinit wr_probe(struct platform_device *pdev)
 {
 	struct net_device	*netdev;
 	struct resource		*regs;
-	int			err = -ENXIO;
 	struct wrnic		*nic;
-	DECLARE_MAC_BUF(mac);
+	int			err;
 
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!regs) {
 		dev_err(&pdev->dev, "no mmio resource defined\n");
+		err = -ENXIO;
 		goto err_out;
 	}
 
-	err = -ENOMEM;
 	netdev = alloc_etherdev(sizeof(struct wrnic));
 	if (!netdev) {
 		dev_err(&pdev->dev, "etherdev alloc failed, aborting.\n");
+		err = -ENOMEM;
 		goto err_out;
 	}
 
 	SET_NETDEV_DEV(netdev, &pdev->dev);
 
-	/* @todo: shall I fill this in? */
-	netdev->features |= 0;
-
 	/* initialise the nic structure */
-	nic = netdev_priv(dev);
+	nic = netdev_priv(netdev);
 	nic->pdev = pdev;
 	nic->netdev = netdev;
-	nic->msg_enable = (1 << wr_debug) - 1;
+	nic->dev = &pdev->dev;
+	nic->msg_enable = (1 << debug) - 1;
 	spin_lock_init(&nic->lock);
 	nic->regs = ioremap(regs->start, regs->end - regs->start + 1);
 	if (!nic->regs) {
@@ -221,36 +673,36 @@ static int __devinit wr_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto err_out_free_netdev;
 	}
+	netdev->base_addr = regs->start;
+	wr_get_mac_addr(nic);
 
-	/* register the isr */
-	netdev->irq = platform_get_irq(pdev, 0);
-	err = request_irq(netdev->irq, wr_intr,
-			IRQF_SHARED | IRQF_SAMPLE_RANDOM, netdev->name, netdev);
-	if (err) {
-		if (netif_msg_probe(nic))
-			dev_err(&pdev->dev, "unable to request IRQ %d, err%d\n",
-			netdev->irq, err);
+	/* grab the interrupt line from platform_device */
+//	netdev->irq = platform_get_irq(pdev, 0);
+
+	netdev->irq = 30;
+
+	if (netdev->irq < 0) {
+		err = -ENODEV;
 		goto err_out_iounmap;
 	}
 
-	/* fill in the net_device methods */
-	netdev->open			= wr_open;
-	netdev->stop			= wr_close;
-	netdev->hard_start_xmit		= wr_start_xmit;
-	netdev->get_stats		= wr_get_stats;
-	netdev->set_multicast_list	= wr_set_multicast_list;
-	netdev->do_ioctl		= wr_do_ioctl;
-	/* i may not need the following for the demo */
-	netdev->tx_timeout		= wr_tx_timeout;
-	netdev->watchdog_timeo		= WR_NIC_WATCHDOG_PERIOD;
-	netdev->set_mac_address		= wr_set_mac_address;
-#ifdef CONFIG_NET_POLL_CONTROLLER
-	netdev->poll_controller		= wr_netpoll;
-#endif
-	SET_ETHTOOL_OPS(netdev, &wr_ethtool_ops);
+	err = request_irq(netdev->irq, wr_interrupt,
+			IRQF_TRIGGER_HIGH | IRQF_SHARED, netdev->name, netdev);
+	if (err) {
+		if (netif_msg_probe(nic)) {
+			dev_err(&netdev->dev, "request IRQ %d failed, err=%d\n",
+				netdev->irq, err);
+		}
+		goto err_out_iounmap;
+	}
 
-	netdev->base_addr = regs->start;
-	wr_get_mac_addr(nic);
+	netdev->netdev_ops = &wr_netdev_ops;
+	SET_ETHTOOL_OPS(netdev, &wr_ethtool_ops);
+	netdev->features |= 0;
+
+	/* setup NAPI */
+	memset(&nic->napi, 0, sizeof(nic->napi));
+	netif_napi_add(netdev, &nic->napi, wr_poll, WR_NIC_NAPI_WEIGHT);
 
 	err = register_netdev(netdev);
 	if (err) {
@@ -259,11 +711,9 @@ static int __devinit wr_probe(struct platform_device *pdev)
 		goto err_out_freeirq;
 	}
 
-	/* make ethtool happy */
-	netif_carrier_off(netdev);
-
 	platform_set_drvdata(pdev, netdev);
 
+	/* WR NIC banner */
 	if (netif_msg_probe(nic)) {
 		dev_info(&pdev->dev, "White Rabbit MCH NIC at 0x%08lx irq %d\n",
 			netdev->base_addr, netdev->irq);
@@ -272,34 +722,57 @@ static int __devinit wr_probe(struct platform_device *pdev)
 	return 0;
 
 err_out_freeirq:
-	free_irq(dev->irq, dev);
+	free_irq(netdev->irq, &pdev->dev);
 err_out_iounmap:
 	iounmap(nic->regs);
 err_out_free_netdev:
-	free_netdev(dev);
+	free_netdev(netdev);
 err_out:
 	platform_set_drvdata(pdev, NULL);
 	return err;
 }
 
-static int __devexit wr_remove(struct platform device *pdev)
+static int __devexit wr_remove(struct platform_device *pdev)
 {
 	struct net_device *netdev;
 	struct wrnic *nic;
 
 	netdev = platform_get_drvdata(pdev);
-	if (!dev)
+	if (!netdev)
 		return 0;
+
+	free_irq(netdev->irq, netdev);
+
 
 	nic = netdev_priv(netdev);
 	unregister_netdev(netdev);
-	free_irq(netdev->irq, netdev);
 	iounmap(nic->regs);
 	free_netdev(netdev);
 	platform_set_drvdata(pdev, NULL);
 
 	return 0;
 }
+
+#ifdef CONFIG_PM
+static int wr_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct net_device *netdev = platform_get_drvdata(pdev);
+
+	netif_device_detach(netdev);
+	return 0;
+}
+
+static int wr_resume(struct platform_device *pdev)
+{
+	struct net_device *netdev = platform_get_drvdata(pdev);
+
+	netif_device_attach(netdev);
+	return 0;
+}
+#else
+#define wr_suspend	NULL
+#define wr_resume	NULL
+#endif
 
 static struct platform_driver wr_driver = {
 	.remove		= __exit_p(wr_remove),
