@@ -137,7 +137,7 @@ static struct resource wr_mch_nic_resources[] = {
 static u64 wr_mch_nic_dmamask = DMA_BIT_MASK(32);
 
 static struct platform_device wr_mch_nic_device = {
-	.name		= "wr-nic",
+	.name		= "wr-mch",
 	.id		= -1,
 	.dev		= {
 			.dma_mask		= &wr_mch_nic_dmamask,
@@ -151,6 +151,8 @@ static struct platform_device wr_mch_nic_device = {
 static void __init wr_mch_add_device_nic(void)
 {
 	/* @todo: init code for the NIC here (IRQ0, etc) */
+	at91_set_B_periph(AT91_PIN_PA14, 0);
+
 	platform_device_register(&wr_mch_nic_device);
 }
 
@@ -256,13 +258,13 @@ static void __init wr_mch_cpu_fpga_init(void)
 		AT91_SMC_NRDSETUP_(4) |
 		AT91_SMC_NCS_RDSETUP_(2));
 	at91_sys_write(AT91_SMC1_PULSE(0),
-		AT91_SMC_NWEPULSE_(24) |
-		AT91_SMC_NCS_WRPULSE_(28) |
-		AT91_SMC_NRDPULSE_(24) |
-		AT91_SMC_NCS_RDPULSE_(28));
+		AT91_SMC_NWEPULSE_(30) |
+		AT91_SMC_NCS_WRPULSE_(34) |
+		AT91_SMC_NRDPULSE_(30) |
+		AT91_SMC_NCS_RDPULSE_(34));
 	at91_sys_write(AT91_SMC1_CYCLE(0),
-		AT91_SMC_NWECYCLE_(34) |
-		AT91_SMC_NRDCYCLE_(34));
+		AT91_SMC_NWECYCLE_(40) |
+		AT91_SMC_NRDCYCLE_(40));
 	at91_sys_write(AT91_SMC1_MODE(0),
 		AT91_SMC_DBW_32 |
 		AT91_SMC_TDF_(0) |
