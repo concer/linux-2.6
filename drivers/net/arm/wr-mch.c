@@ -21,6 +21,8 @@
 #include <linux/irq.h>
 #include <linux/if.h>
 
+#include <asm/atomic.h>
+
 #include "wr-mch-fpga.h"
 #include "wr-mch.h"
 
@@ -49,6 +51,10 @@ struct wrnic {
 	spinlock_t		lock;
 	unsigned int		tx_head;
 	unsigned int		tx_count;
+	atomic_t		tx_hwtag;
+	struct sk_buff		*tx_skb;
+	int			rx_hwtstamp_enable;
+	int			tx_hwtstamp_enable;
 	struct platform_device	*pdev;
 	struct device		*dev;
 	struct net_device	*netdev;
@@ -211,6 +217,37 @@ static struct net_device_stats *wr_get_stats(struct net_device *netdev)
 }
 
 /*
+ * NOTE: the hardware is broken --> the awkward swapping below is necessary
+ */
+static u32 wr_get_rx_hwtstamp(struct wrnic *nic, unsigned st8)
+{
+	u32 h2 = wr_readl(nic, WR_NIC_RX_OFFSET + (st8 + 0x8) &	WR_NIC_RX_MASK);
+	u32 h3 = wr_readl(nic, WR_NIC_RX_OFFSET + (st8 + 0xc) &	WR_NIC_RX_MASK);
+
+	return (h2 & 0xffff0000) | (h3 & 0xffff);
+}
+
+/*
+ * In WR we're only interested in the hardware's "raw" time, therefore
+ * leave the other two entries blank.
+ * A WR device ticks synchronously every 8ns (==freq 125MHz). A counter of
+ * these ticks is what we get in the lower 27 bits of the 'timestamp' field
+ * of a WR header.
+ */
+static void
+__wr_rx_hwtstamp(struct wrnic *nic, struct sk_buff *skb, unsigned start8)
+{
+	struct skb_shared_hwtstamps *stamps = skb_hwtstamps(skb);
+	/* 125MHz ticks into ns */
+	u32 ns = (wr_get_rx_hwtstamp(nic, start8) & 0x7ffffff) << 3;
+
+	memset(stamps, 0, sizeof(*stamps));
+	/* @fixme this doesn't take into account overflow */
+	stamps->hwtstamp = ns_to_ktime(ns);
+	dev_info(nic->dev, "rx ticks from endpoint: %d.\n", ns >> 3);
+}
+
+/*
  * There are three fields in an RX WR header:
  * ||	size	|	flags	|	OOB	|	tstamp	||
  * ||	32b	|	32b	|	32b	|	32b	||
@@ -249,6 +286,10 @@ static int wr_rx_frame(struct wrnic *nic)
 
 	/* @fixme ignore the checksum for the time being */
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
+
+	/* pass up the timestamp before telling netif that we're done */
+	if (nic->rx_hwtstamp_enable)
+		__wr_rx_hwtstamp(nic, skb, start8);
 
 	netdev->last_rx = jiffies;
 	nic->stats.rx_packets++;
@@ -314,7 +355,45 @@ static int wr_poll(struct napi_struct *napi, int budget)
 	return work_done;
 }
 
-static inline void wr_tx_ack(struct wrnic *nic)
+/*
+ * Go to the endpoint's FIFO and fetch the matching timestamp
+ * If there's no valid entry, return 0.
+ * NOTE: this only supports a single endpoint, support for the entire
+ * switch will be added in future revisions.
+ */
+static u32 wr_get_tx_hwtstamp(struct wrnic *nic)
+{
+	u32 status = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPSTA);
+	u32 tag, ts;
+
+	/* this is atomic context; if there's nothing, simply bail out */
+	if (WR_EPSTA_TSFIFO_EMPTY(status))
+		return 0;
+	tag	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSTAG);
+	ts	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSVAL);
+	dev_info(nic->dev, "tx ticks from endpoint: %d.\n", ts & 0x7ffffff);
+	return tag == atomic_read(&nic->tx_hwtag) ? ts : 0;
+}
+
+static void __wr_tx_hwtstamp(struct wrnic *nic, struct sk_buff *skb)
+{
+//	union skb_shared_tx *shtx = skb_tx(skb);
+	struct skb_shared_hwtstamps stamps;
+	u32 tstamp;
+
+//	if (!shtx->hardware)
+//		return;
+
+	/* try to get a valid timestamp for the current tx */
+	tstamp = wr_get_tx_hwtstamp(nic) & 0x7ffffff;
+	if (!tstamp)
+		return;
+	memset(&stamps, 0, sizeof(stamps));
+	stamps.hwtstamp = ns_to_ktime(tstamp << 3);
+	skb_tstamp_tx(skb, &stamps);
+}
+
+static inline void wr_tx_handle_irq(struct wrnic *nic)
 {
 	struct net_device *netdev = nic->netdev;
 	unsigned long flags;
@@ -323,6 +402,11 @@ static inline void wr_tx_ack(struct wrnic *nic)
 
 	nic->tx_count++;
 	mb();
+	/* fetch the hardware timestamp (if requested) and free the buffer */
+	if (nic->tx_hwtstamp_enable)
+		__wr_tx_hwtstamp(nic, nic->tx_skb);
+	dev_kfree_skb_irq(nic->tx_skb);
+
 	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
 	if (netif_queue_stopped(nic->netdev) && TX_BUFFS_AVAIL(nic) > 0)
 		netif_wake_queue(netdev);
@@ -350,7 +434,7 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 	if (net_ratelimit())
 		dev_info(nic->dev, "Interrupt %08x received\n", isr);
 	if (isr & WR_NIC_ISR_TXI)
-		wr_tx_ack(nic);
+		wr_tx_handle_irq(nic);
 
 	if (isr & WR_NIC_ISR_RXI) {
 		if (napi_schedule_prep(&nic->napi)) {
@@ -360,8 +444,15 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 		}
 	}
 
-	if (isr & WR_NIC_ISR_TXERR)
+	/*
+	 * The NIC will never assert both TXERR and TXI at the same time,
+	 * but let's just be a bit paranoid to avoid a possible double kfree.
+	 */
+	if (isr & WR_NIC_ISR_TXERR) {
+		if (!(isr & WR_NIC_ISR_TXI))
+			dev_kfree_skb_irq(nic->tx_skb);
 		netdev->stats.tx_errors++;
+	}
 
 	if (isr & WR_NIC_ISR_RXERR)
 		netdev->stats.rx_errors++;
@@ -489,10 +580,22 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 	dump_packet(data, size);
 	dev_info(nic->dev, "CRC: %08x\n", crc);
 
-	/* fill in WR headers: flags and OOB are set to 0 for the time being */
+	/*
+	 * fill in WR headers: size, flags and OOB
+	 * NOTE: flags and OOB are reversed in the hardware
+	 * The 'hwtag' is associated to the TX timestamp when passing
+	 * through an endpoint if it has non-empty flags. This implementation
+	 * will be fixed/refined in future hardware revisions.
+	 */
 	wr_writel(nic, WR_NIC_TX_OFFSET + h8, size + 4);
-	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 4, 0);
-	wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8, 0);
+	if (nic->tx_hwtstamp_enable) {
+		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 4, 1);
+		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8,
+			atomic_inc_return(&nic->tx_hwtag));
+	} else {
+		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 4, 0);
+		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8, 0);
+	}
 
 	/* transfer the payload */
 	__wr_writesl(nic, WR_NIC_TX_OFFSET + h8 + 0xc, my_txbuf, len + 1);
@@ -535,6 +638,16 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	dev_info(nic->dev, "%s: len %d\n", __func__, len);
 
+	if (nic->tx_hwtstamp_enable) {
+		union skb_shared_tx *shtx = skb_tx(skb);
+
+		if (shtx->hardware)
+			shtx->in_progress = 1;
+	}
+
+	/* save a pointer to the skb and free it in the interrupt handler */
+	nic->tx_skb = skb;
+
 	__wr_hw_tx(nic, data, len);
 	nic->tx_count--;
 	nic->stats.tx_packets++;
@@ -544,28 +657,64 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		netif_stop_queue(netdev);
 
 	netdev->trans_start = jiffies;
-out:
-	dev_kfree_skb(skb);
+
 	spin_unlock_irq(&nic->lock);
 	return NETDEV_TX_OK;
 }
 
 static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 {
-	struct hwtstamp_config	config;
+	struct wrnic *nic = netdev_priv(netdev);
+	struct hwtstamp_config config;
 
 	if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
 		return -EFAULT;
 
-	/* reserver for future extensions of the interface */
+	/* reserve for future extensions of the interface */
 	if (config.flags)
 		return -EFAULT;
 
-	if (config.tx_type == HWTSTAMP_TX_OFF &&
-		config.rx_filter == HWTSTAMP_FILTER_NONE)
-		return 0;
+	switch (config.tx_type) {
+	case HWTSTAMP_TX_ON:
+		nic->tx_hwtstamp_enable = 1;
+		break;
+	case HWTSTAMP_TX_OFF:
+		nic->tx_hwtstamp_enable = 0;
+		break;
+	default:
+		return -ERANGE;
+	}
 
-	return -ERANGE;
+	/*
+	 * For the time being, make this really simple and stupid: either
+	 * time-tag _all_ the incoming packets or none of them.
+	 */
+	switch(config.rx_filter) {
+	case HWTSTAMP_FILTER_NONE:
+		nic->rx_hwtstamp_enable = 0;
+		break;
+	case HWTSTAMP_FILTER_ALL:
+	case HWTSTAMP_FILTER_SOME:
+	case HWTSTAMP_FILTER_PTP_V1_L4_EVENT:
+	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
+	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_L4_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_L4_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_L2_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_L2_DELAY_REQ:
+	case HWTSTAMP_FILTER_PTP_V2_EVENT:
+	case HWTSTAMP_FILTER_PTP_V2_SYNC:
+	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
+		nic->rx_hwtstamp_enable = 1;
+		config.rx_filter = HWTSTAMP_FILTER_ALL;
+		break;
+	default:
+		return -ERANGE;
+	}
+	return copy_to_user(rq->ifr_data, &config, sizeof(config)) ?
+		-EFAULT : 0;
 }
 
 static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
@@ -727,6 +876,9 @@ static int __devinit wr_probe(struct platform_device *pdev)
 	nic->dev = &pdev->dev;
 	nic->msg_enable = (1 << debug) - 1;
 	spin_lock_init(&nic->lock);
+	atomic_set(&nic->tx_hwtag, 0);
+	nic->tx_hwtstamp_enable = 0;
+	nic->rx_hwtstamp_enable = 0;
 	nic->regs = ioremap(regs->start, regs->end - regs->start + 1);
 	if (!nic->regs) {
 		if (netif_msg_probe(nic))
