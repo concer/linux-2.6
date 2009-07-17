@@ -484,7 +484,7 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 	nic->tx_head = txend;
 	h8 = nic->tx_head << 2;
 
-	dev_info(nic->dev, "TX: txstart %08x, txend 0x%08x len=0x%x, size=0x%x\n",
+	dev_info(nic->dev, "TX: txstart 0x%x, txend 0x%x len=0x%x, size=0x%x\n",
 		txstart, txend,	len, size);
 	dump_packet(data, size);
 	dev_info(nic->dev, "CRC: %08x\n", crc);
