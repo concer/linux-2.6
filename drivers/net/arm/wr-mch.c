@@ -13,7 +13,6 @@
 #include <linux/net_tstamp.h>
 #include <linux/interrupt.h>
 #include <linux/netdevice.h>
-#include <linux/dmapool.h>
 #include <linux/ethtool.h>
 #include <linux/device.h>
 #include <linux/module.h>
