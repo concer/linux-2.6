@@ -118,7 +118,8 @@ static struct at91_eth_data wr_mch_macb_data __initdata = {
  * WhiteRabbit NIC (wr-nic) stub
  */
 #define WR_MCH_FPGA_BASE	0x70000000
-#define WR_MCH_NIC_BASE		(WR_MCH_FPGA_BASE + 0x140000)
+#define WR_MCH_CS0_SIZE		0x200000
+#define WR_MCH_NIC_BASE		((WR_MCH_FPGA_BASE) + 0x140000)
 #define WR_MCH_NIC_SIZE		0x40000
 
 static struct resource wr_mch_nic_resources[] = {
@@ -131,6 +132,11 @@ static struct resource wr_mch_nic_resources[] = {
 		.start	= AT91SAM9263_ID_IRQ0,
 		.end	= AT91SAM9263_ID_IRQ0,
 		.flags	= IORESOURCE_IRQ,
+	},
+	[2] = {
+		.start	= WR_MCH_FPGA_BASE,
+		.end	= WR_MCH_FPGA_BASE + WR_MCH_CS0_SIZE - 1,
+		.flags	= IORESOURCE_MEM,
 	},
 };
 

@@ -22,7 +22,7 @@
 #include <linux/irq.h>
 #include <linux/if.h>
 
-
+#include "wr-mch-fpga.h"
 #include "wr-mch.h"
 
 #define DRV_NAME		"wr-mch"
@@ -43,6 +43,7 @@
 
 struct wrnic {
 	void __iomem		*regs;
+	void __iomem		*cs0; /* FPGA Chip Select 0 */
 	spinlock_t		lock;
 	unsigned int		tx_head;
 	unsigned int		tx_count;
@@ -72,6 +73,12 @@ MODULE_PARM_DESC(mac, "Mac Address (u32)");
 
 #define wr_writel(wrnic,offs,value)			\
 	__raw_writel((value), (wrnic)->regs + (offs))
+
+#define wr_cs0_readl(wrnic,offs)		\
+	__raw_readl((wrnic)->cs0 + (offs))
+
+#define wr_cs0_writel(wrnic,offs,value)			\
+	__raw_writel((value), (wrnic)->cs0 + (offs))
 
 /*
  * NUXI swapping functions: UNIX -> NUXI
@@ -690,13 +697,20 @@ static const struct net_device_ops wr_netdev_ops = {
 static int __devinit wr_probe(struct platform_device *pdev)
 {
 	struct net_device	*netdev;
-	struct resource		*regs;
+	struct resource		*regs, *cs0;
 	struct wrnic		*nic;
 	int			err;
 
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!regs) {
 		dev_err(&pdev->dev, "no mmio resource defined\n");
+		err = -ENXIO;
+		goto err_out;
+	}
+
+	cs0 = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!cs0) {
+		dev_err(&pdev->dev, "no fpga-cs0 resource defined\n");
 		err = -ENXIO;
 		goto err_out;
 	}
@@ -724,6 +738,15 @@ static int __devinit wr_probe(struct platform_device *pdev)
 		err = -ENOMEM;
 		goto err_out_free_netdev;
 	}
+
+	nic->cs0 = ioremap(cs0->start, cs0->end - cs0->start + 1);
+	if (!nic->cs0) {
+		if (netif_msg_probe(nic))
+			dev_err(&pdev->dev, "failed to map fpga-cs0\n");
+		err = -ENOMEM;
+		goto err_out_iounmap_regs;
+	}
+
 	netdev->base_addr = regs->start;
 	wr_get_mac_addr(nic);
 
@@ -775,6 +798,8 @@ static int __devinit wr_probe(struct platform_device *pdev)
 err_out_freeirq:
 	free_irq(netdev->irq, &pdev->dev);
 err_out_iounmap:
+	iounmap(nic->cs0);
+err_out_iounmap_regs:
 	iounmap(nic->regs);
 err_out_free_netdev:
 	free_netdev(netdev);
@@ -798,6 +823,7 @@ static int __devexit wr_remove(struct platform_device *pdev)
 	nic = netdev_priv(netdev);
 	unregister_netdev(netdev);
 	iounmap(nic->regs);
+	iounmap(nic->cs0);
 	free_netdev(netdev);
 	platform_set_drvdata(pdev, NULL);
 
