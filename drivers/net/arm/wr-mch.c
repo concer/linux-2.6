@@ -752,16 +752,11 @@ static int __devinit wr_probe(struct platform_device *pdev)
 	netdev->base_addr = regs->start;
 	wr_get_mac_addr(nic);
 
-	/* grab the interrupt line from platform_device */
-//	netdev->irq = platform_get_irq(pdev, 0);
-
-	netdev->irq = 30;
-
+	netdev->irq = platform_get_irq(pdev, 0);
 	if (netdev->irq < 0) {
-		err = -ENODEV;
+		err = -ENXIO;
 		goto err_out_iounmap;
 	}
-
 	err = request_irq(netdev->irq, wr_interrupt,
 			IRQF_TRIGGER_HIGH | IRQF_SHARED, netdev->name, netdev);
 	if (err) {
