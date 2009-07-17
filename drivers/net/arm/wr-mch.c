@@ -35,8 +35,11 @@
 #define WR_NIC_TX_MAX		5
 #define WR_NIC_RX_MAX		10
 #define WR_NIC_RX_DESC_SIZE	128
-#define WR_NIC_TX_MASK		0x7ff
-#define WR_NIC_RX_MASK		0xfff
+/*
+ * These masks count in the 1-bit wrap-around area
+ */
+#define WR_NIC_TX_MASK		0xfff
+#define WR_NIC_RX_MASK		0x1fff
 
 #define TX_BUFFS_AVAIL(nic)	((nic)->tx_count)
 
