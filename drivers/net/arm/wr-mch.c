@@ -532,12 +532,6 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		dev_err(&netdev->dev, "BUG: Tx Ring full when queue awake\n");
 		return 1;
 	}
-	if (skb->ip_summed == CHECKSUM_PARTIAL) {
-		if (skb_checksum_help(skb)) {
-			dev_warn(nic->dev, "packet checksum failed\n");
-			goto out;
-		}
-	}
 
 	dev_info(nic->dev, "%s: len %d\n", __func__, len);
 
