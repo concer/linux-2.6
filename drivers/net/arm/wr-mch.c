@@ -224,7 +224,7 @@ static int wr_rx_frame(struct wrnic *nic)
 	/* the NIC returns the size with the MSB first */
 	ssize_t		size8	= wr_readl(nic, WR_NIC_RX_OFFSET + start8) >> 16;
 	unsigned int	size32	= (size8 + 3) >> 2;
-	unsigned int	newhead, end32;
+	unsigned int	newhead;
 	char tempbuf[WR_NIC_BUFSIZE];
 
 	dev_info(nic->dev, "%s: frame size: %d bytes\n", __func__, size8);
@@ -240,6 +240,7 @@ static int wr_rx_frame(struct wrnic *nic)
 	/* read size32 double words starting just after the WR header */
 	__wr_readsl(nic, WR_NIC_RX_OFFSET + start8 + 0x10,
 		skb_put(skb, size32 << 2), size32);
+	/* fixme: grab the data from the skb and avoid reading it again */
 	__wr_readsl(nic, WR_NIC_RX_OFFSET + start8 + 0x10, tempbuf, size32);
 	dump_packet(tempbuf, size8);
 
@@ -257,7 +258,6 @@ static int wr_rx_frame(struct wrnic *nic)
 	/* tell the hardware we've processed the buffer */
 	wmb();
 	newhead = (start32 + 4 + size32) & WR_NIC_RX_MASK;
-	end32 = wr_readl(nic, WR_NIC_RX_DESC_START);
 	wr_writel(nic, WR_NIC_RX_DESC_START, newhead);
 	return 0;
 drop:
