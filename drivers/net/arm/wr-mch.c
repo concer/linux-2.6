@@ -76,16 +76,16 @@ static u32 mac;
 module_param(mac, int, 0);
 MODULE_PARM_DESC(mac, "Mac Address (u32)");
 
-#define wr_readl(wrnic,offs)			\
+#define wr_readl(wrnic, offs)			\
 	__raw_readl((wrnic)->regs + (offs))
 
-#define wr_writel(wrnic,offs,value)			\
+#define wr_writel(wrnic, offs, value)			\
 	__raw_writel((value), (wrnic)->regs + (offs))
 
-#define wr_cs0_readl(wrnic,offs)		\
+#define wr_cs0_readl(wrnic, offs)		\
 	__raw_readl((wrnic)->cs0 + (offs))
 
-#define wr_cs0_writel(wrnic,offs,value)			\
+#define wr_cs0_writel(wrnic, offs, value)		\
 	__raw_writel((value), (wrnic)->cs0 + (offs))
 
 /*
@@ -99,9 +99,9 @@ __wr_readsl(struct wrnic *nic, unsigned offset, void *dst, unsigned count)
 			struct S { int x __packed; };
 
 			((struct S *)dst)->x = swahb32(wr_readl(nic, offset));
-                        dst += 4;
+			dst += 4;
 			offset += 4;
-                }
+		}
 	} else {
 		while (count--) {
 			*(u32 *)dst = swahb32(wr_readl(nic, offset));
@@ -119,9 +119,9 @@ __wr_writesl(struct wrnic *nic, unsigned offset, void *src, unsigned count)
 			struct S { int x __packed; };
 
 			wr_writel(nic, offset, swahb32(((struct S *)src)->x));
-                        src += 4;
+			src += 4;
 			offset += 4;
-                }
+		}
 	} else {
 		while (count--) {
 			wr_writel(nic, offset, swahb32(*(u32 *)src));
@@ -690,7 +690,7 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	 * For the time being, make this really simple and stupid: either
 	 * time-tag _all_ the incoming packets or none of them.
 	 */
-	switch(config.rx_filter) {
+	switch (config.rx_filter) {
 	case HWTSTAMP_FILTER_NONE:
 		nic->rx_hwtstamp_enable = 0;
 		break;
