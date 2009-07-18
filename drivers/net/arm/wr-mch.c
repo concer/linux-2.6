@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/module.h>
 #include <linux/crc32.h>
+#include <linux/if_wr.h>
 #include <linux/swab.h>
 #include <linux/irq.h>
 #include <linux/if.h>
@@ -366,31 +367,13 @@ static u32 wr_get_tx_hwtstamp(struct wrnic *nic)
 	u32 status = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPSTA);
 	u32 tag, ts;
 
-	/* this is atomic context; if there's nothing, simply bail out */
+	/* if there's nothing, simply bail out */
 	if (WR_EPSTA_TSFIFO_EMPTY(status))
 		return 0;
 	tag	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSTAG);
 	ts	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSVAL);
 	dev_info(nic->dev, "tx ticks from endpoint: %d.\n", ts & 0x7ffffff);
 	return tag == atomic_read(&nic->tx_hwtag) ? ts : 0;
-}
-
-static void __wr_tx_hwtstamp(struct wrnic *nic, struct sk_buff *skb)
-{
-//	union skb_shared_tx *shtx = skb_tx(skb);
-	struct skb_shared_hwtstamps stamps;
-	u32 tstamp;
-
-//	if (!shtx->hardware)
-//		return;
-
-	/* try to get a valid timestamp for the current tx */
-	tstamp = wr_get_tx_hwtstamp(nic) & 0x7ffffff;
-	if (!tstamp)
-		return;
-	memset(&stamps, 0, sizeof(stamps));
-	stamps.hwtstamp = ns_to_ktime(tstamp << 3);
-	skb_tstamp_tx(skb, &stamps);
 }
 
 static inline void wr_tx_handle_irq(struct wrnic *nic)
@@ -400,9 +383,6 @@ static inline void wr_tx_handle_irq(struct wrnic *nic)
 
 	spin_lock_irqsave(&nic->lock, flags);
 
-	/* fetch the hardware timestamp (if requested) and free the buffer */
-	if (nic->tx_hwtstamp_enable)
-		__wr_tx_hwtstamp(nic, nic->tx_skb);
 	dev_kfree_skb_irq(nic->tx_skb);
 	nic->tx_count++;
 	wmb();
@@ -718,11 +698,29 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 		-EFAULT : 0;
 }
 
+/*
+ * This IOCTL is called a few microseconds after sending a packet
+ * Then it returns the last packet tagged
+ * This is obviously wrong but for the demo should be good enough
+ * Later on we'll implement a proper interface
+ */
+static int
+wr_get_tx_hwtstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
+{
+	struct wrnic *nic = netdev_priv(netdev);
+	u32 ts;
+
+	ts = wr_get_tx_hwtstamp(nic) & 0x7ffffff;
+	return put_user(ts, (__u32 __user *)rq->ifr_data);
+}
+
 static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 {
 	switch (cmd) {
 	case SIOCSHWTSTAMP:
 		return wr_tstamp_ioctl(netdev, rq, cmd);
+	case WR_MCH_IOCGTXHWTSTAMP:
+		return wr_get_tx_hwtstamp_ioctl(netdev, rq, cmd);
 	default:
 		return -EOPNOTSUPP;
 	}
