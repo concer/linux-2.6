@@ -53,7 +53,6 @@ struct wrnic {
 	unsigned int		tx_head;
 	unsigned int		tx_count;
 	atomic_t		tx_hwtag;
-	struct sk_buff		*tx_skb;
 	int			rx_hwtstamp_enable;
 	int			tx_hwtstamp_enable;
 	struct platform_device	*pdev;
@@ -383,7 +382,6 @@ static inline void wr_tx_handle_irq(struct wrnic *nic)
 
 	spin_lock_irqsave(&nic->lock, flags);
 
-	dev_kfree_skb_irq(nic->tx_skb);
 	nic->tx_count++;
 	wmb();
 	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
@@ -428,10 +426,8 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 	 * but let's just be a bit paranoid to avoid a possible double kfree.
 	 */
 	if (isr & WR_NIC_ISR_TXERR) {
-		if (!(isr & WR_NIC_ISR_TXI)) {
-			dev_kfree_skb_irq(nic->tx_skb);
+		if (!(isr & WR_NIC_ISR_TXI))
 			nic->tx_count++;
-		}
 		netdev->stats.tx_errors++;
 	}
 
@@ -626,9 +622,6 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 			shtx->in_progress = 1;
 	}
 
-	/* save a pointer to the skb and free it in the interrupt handler */
-	nic->tx_skb = skb;
-
 	__wr_hw_tx(nic, data, len);
 	nic->tx_count--;
 	nic->stats.tx_packets++;
@@ -638,7 +631,7 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		netif_stop_queue(netdev);
 
 	netdev->trans_start = jiffies;
-
+	dev_kfree_skb_irq(skb);
 	spin_unlock_irq(&nic->lock);
 	return NETDEV_TX_OK;
 }
