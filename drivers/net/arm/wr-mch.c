@@ -44,14 +44,14 @@
 #define WR_NIC_TX_MASK		0xfff
 #define WR_NIC_RX_MASK		0x1fff
 
-#define TX_BUFFS_AVAIL(nic)	((nic)->tx_count)
+#define TX_BUFFS_AVAIL(nic)	(atomic_read(&(nic)->tx_count))
 
 struct wrnic {
 	void __iomem		*regs;
 	void __iomem		*cs0; /* FPGA Chip Select 0 */
 	spinlock_t		lock;
 	unsigned int		tx_head;
-	unsigned int		tx_count;
+	atomic_t		tx_count;
 	atomic_t		tx_hwtag;
 	int			rx_hwtstamp_enable;
 	int			tx_hwtstamp_enable;
@@ -382,8 +382,7 @@ static inline void wr_tx_handle_irq(struct wrnic *nic)
 
 	spin_lock_irqsave(&nic->lock, flags);
 
-	nic->tx_count++;
-	wmb();
+	atomic_inc(&nic->tx_count);
 	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
 	if (netif_queue_stopped(nic->netdev) && TX_BUFFS_AVAIL(nic) > 0)
 		netif_wake_queue(netdev);
@@ -427,7 +426,7 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 	 */
 	if (isr & WR_NIC_ISR_TXERR) {
 		if (!(isr & WR_NIC_ISR_TXI))
-			nic->tx_count++;
+			atomic_inc(&nic->tx_count);
 		netdev->stats.tx_errors++;
 	}
 
@@ -623,7 +622,7 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	}
 
 	__wr_hw_tx(nic, data, len);
-	nic->tx_count--;
+	atomic_dec(&nic->tx_count);
 	nic->stats.tx_packets++;
 	nic->stats.tx_bytes += len;
 
@@ -721,7 +720,7 @@ static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 
 static void wr_init_tx_ring(struct wrnic *nic)
 {
-	nic->tx_count = 1;
+	atomic_set(&nic->tx_count, 1);
 }
 
 static void wr_init_rx_ring(struct wrnic *nic)
