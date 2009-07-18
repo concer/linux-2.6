@@ -221,8 +221,8 @@ static struct net_device_stats *wr_get_stats(struct net_device *netdev)
  */
 static u32 wr_get_rx_hwtstamp(struct wrnic *nic, unsigned st8)
 {
-	u32 h2 = wr_readl(nic, WR_NIC_RX_OFFSET + (st8 + 0x8) &	WR_NIC_RX_MASK);
-	u32 h3 = wr_readl(nic, WR_NIC_RX_OFFSET + (st8 + 0xc) &	WR_NIC_RX_MASK);
+	u32 h2 = wr_readl(nic, WR_NIC_RX_OFFSET + ((st8 + 0x8) & WR_NIC_RX_MASK));
+	u32 h3 = wr_readl(nic, WR_NIC_RX_OFFSET + ((st8 + 0xc) & WR_NIC_RX_MASK));
 
 	return (h2 & 0xffff0000) | (h3 & 0xffff);
 }
@@ -400,13 +400,12 @@ static inline void wr_tx_handle_irq(struct wrnic *nic)
 
 	spin_lock_irqsave(&nic->lock, flags);
 
-	nic->tx_count++;
-	mb();
 	/* fetch the hardware timestamp (if requested) and free the buffer */
 	if (nic->tx_hwtstamp_enable)
 		__wr_tx_hwtstamp(nic, nic->tx_skb);
 	dev_kfree_skb_irq(nic->tx_skb);
-
+	nic->tx_count++;
+	wmb();
 	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
 	if (netif_queue_stopped(nic->netdev) && TX_BUFFS_AVAIL(nic) > 0)
 		netif_wake_queue(netdev);
@@ -449,8 +448,10 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 	 * but let's just be a bit paranoid to avoid a possible double kfree.
 	 */
 	if (isr & WR_NIC_ISR_TXERR) {
-		if (!(isr & WR_NIC_ISR_TXI))
+		if (!(isr & WR_NIC_ISR_TXI)) {
 			dev_kfree_skb_irq(nic->tx_skb);
+			nic->tx_count++;
+		}
 		netdev->stats.tx_errors++;
 	}
 
