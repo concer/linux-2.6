@@ -523,7 +523,7 @@ static void wr_hw_init(struct wrnic *nic)
  * NOTE: the CRC for the packet is appended in software--this will
  * be done in hardware soon.
  */
-static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
+static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size, bool do_ts)
 {
 	/* len is in double words (32bits) and doesn't include the CRC */
 	unsigned int len = (size >> 2) + !!(size & 0x3);
@@ -564,7 +564,7 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 	 * will be fixed/refined in future hardware revisions.
 	 */
 	wr_writel(nic, WR_NIC_TX_OFFSET + h8, size + 4);
-	if (nic->tx_hwtstamp_enable) {
+	if (do_ts) {
 		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 4, 1);
 		wr_writel(nic, WR_NIC_TX_OFFSET + h8 + 8,
 			atomic_inc_return(&nic->tx_hwtag));
@@ -584,6 +584,7 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size)
 static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 {
 	struct wrnic *nic = netdev_priv(netdev);
+	union skb_shared_tx *shtx;
 	char shortpkt[WR_NIC_ZLEN];
 	char *data;
 	unsigned len;
@@ -614,14 +615,13 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 
 	dev_info(nic->dev, "%s: len %d\n", __func__, len);
 
-	if (nic->tx_hwtstamp_enable) {
-		union skb_shared_tx *shtx = skb_tx(skb);
-
-		if (shtx->hardware)
-			shtx->in_progress = 1;
+	shtx = skb_tx(skb);
+	if (nic->tx_hwtstamp_enable && shtx->hardware) {
+		shtx->in_progress = 1;
+		__wr_hw_tx(nic, data, len, true);
+	} else {
+		__wr_hw_tx(nic, data, len, false);
 	}
-
-	__wr_hw_tx(nic, data, len);
 	atomic_dec(&nic->tx_count);
 	nic->stats.tx_packets++;
 	nic->stats.tx_bytes += len;
