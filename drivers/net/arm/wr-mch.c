@@ -131,6 +131,7 @@ __wr_writesl(struct wrnic *nic, unsigned offset, void *src, unsigned count)
 	}
 }
 
+#ifdef DEBUG
 static void dump_packet(char *data, unsigned len)
 {
 	int i = 0;
@@ -143,15 +144,19 @@ static void dump_packet(char *data, unsigned len)
 	if (i % 16)
 		printk("\n");
 }
+#else
+static void dump_packet(char *data, unsigned len)
+{ }
+#endif /* DEBUG */
 
 static void wr_disable_irq(struct wrnic *nic, u32 mask)
 {
 	u32 imask = wr_readl(nic, WR_NIC_IER);
-	printk(KERN_ERR "wr_disable_irq() - mask %x IER %x\n", mask, imask);
+	dev_dbg(nic->dev, "wr_disable_irq() - mask %x IER %x\n", mask, imask);
 
 	imask &= ~mask;
 	wr_writel(nic, WR_NIC_IER, imask);
-	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
+	dev_dbg(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 }
 
 static void wr_enable_irq(struct wrnic *nic, u32 mask)
@@ -159,10 +164,10 @@ static void wr_enable_irq(struct wrnic *nic, u32 mask)
 	u32 imask = wr_readl(nic, WR_NIC_IER);
 
 	imask |= mask;
-	printk(KERN_ERR "wr_enable_irq() - mask %x IER %x\n", mask, imask);
+	dev_dbg(nic->dev, "wr_enable_irq() - mask %x IER %x\n", mask, imask);
 
 	wr_writel(nic, WR_NIC_IER, imask);
-	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
+	dev_dbg(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 }
 
 static void wr_clear_irq(struct wrnic *nic, u32 mask)
@@ -244,7 +249,7 @@ __wr_rx_hwtstamp(struct wrnic *nic, struct sk_buff *skb, unsigned start8)
 	memset(stamps, 0, sizeof(*stamps));
 	/* @fixme this doesn't take into account overflow */
 	stamps->hwtstamp = ns_to_ktime(ns);
-	dev_info(nic->dev, "rx ticks from endpoint: %d.\n", ns >> 3);
+	dev_dbg(nic->dev, "rx ticks from endpoint: %d.\n", ns >> 3);
 }
 
 /*
@@ -264,7 +269,7 @@ static int wr_rx_frame(struct wrnic *nic)
 	unsigned int	newhead;
 	char tempbuf[WR_NIC_BUFSIZE];
 
-	dev_info(nic->dev, "%s: frame size: %d bytes\n", __func__, size8);
+	dev_dbg(nic->dev, "%s: frame size: %d bytes\n", __func__, size8);
 	skb = netdev_alloc_skb(netdev, (size32 << 2) + NET_IP_ALIGN);
 	if (unlikely(skb == NULL)) {
 		if (net_ratelimit())
@@ -316,7 +321,7 @@ static bool wr_rx_pending(struct wrnic *nic)
 	 */
 	rxhead = wr_readl(nic, WR_NIC_RX_DESC_START) & WR_NIC_RX_MASK;
 	rxtail = wr_readl(nic, WR_NIC_RX_DESC_END) & WR_NIC_RX_MASK;
-	dev_info(nic->dev, "%s: head: 0x%x, tail: 0x%x\n", __func__,
+	dev_dbg(nic->dev, "%s: head: 0x%x, tail: 0x%x\n", __func__,
 		rxhead, rxtail);
 	if (rxhead == rxtail ||	rxhead == ((rxtail + 1) & WR_NIC_RX_MASK))
 		return false;
@@ -327,8 +332,8 @@ static int wr_rx(struct wrnic *nic, int budget)
 {
 	int work_done = 0;
 
-	dev_info(nic->dev, "%s\n", __func__);
-	dev_info(nic->dev, "budget: %d, rx_pending: %d\n", budget,
+	dev_dbg(nic->dev, "%s\n", __func__);
+	dev_dbg(nic->dev, "budget: %d, rx_pending: %d\n", budget,
 		wr_rx_pending(nic));
 	while (budget > 0 && wr_rx_pending(nic)) {
 		if (!wr_rx_frame(nic))
@@ -343,7 +348,7 @@ static int wr_poll(struct napi_struct *napi, int budget)
 	struct wrnic *nic = container_of(napi, struct wrnic, napi);
 	unsigned int work_done = 0;
 
-	dev_info(nic->dev, "%s\n", __func__);
+	dev_dbg(nic->dev, "%s\n", __func__);
 	work_done = wr_rx(nic, budget);
 
 	/* if budget not fully consumed, exit the polling mode */
@@ -374,7 +379,7 @@ static u32 wr_get_tx_hwtstamp(struct wrnic *nic)
 		ts = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSVAL);
 	} while (tag != atomic_read(&nic->tx_hwtag));
 
-	dev_info(nic->dev, "tx ticks from endpoint: %d.\n", ts & 0x7ffffff);
+	dev_dbg(nic->dev, "tx ticks from endpoint: %d.\n", ts & 0x7ffffff);
 	return ts;
 }
 
@@ -386,7 +391,7 @@ static inline void wr_tx_handle_irq(struct wrnic *nic)
 	spin_lock_irqsave(&nic->lock, flags);
 
 	atomic_inc(&nic->tx_count);
-	dev_info(nic->dev, "TX: ack interrupt received from the NIC\n");
+	dev_dbg(nic->dev, "TX: ack interrupt received from the NIC\n");
 	if (netif_queue_stopped(nic->netdev) && TX_BUFFS_AVAIL(nic) > 0)
 		netif_wake_queue(netdev);
 
@@ -406,12 +411,12 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 //		if (net_ratelimit())
 //			dev_warn(nic->dev, "spurious ISR -- count=%08d", isr_counter);
 		if (isr_counter % 100 == 0)
-			printk(KERN_ERR "spurious ISR -- count=%d\n", isr_counter);
+			dev_dbg(nic->dev, "spurious ISR -- count=%d\n", isr_counter);
 		return IRQ_NONE;
 	}
 
 	if (net_ratelimit())
-		dev_info(nic->dev, "Interrupt %08x received\n", isr);
+		dev_dbg(nic->dev, "Interrupt %08x received\n", isr);
 	if (isr & WR_NIC_ISR_TXI)
 		wr_tx_handle_irq(nic);
 
@@ -438,7 +443,7 @@ static irqreturn_t wr_interrupt(int irq, void *dev_id)
 
 	/* the interrupt status register is clear-on-write for each bit */
 	wr_clear_irq(nic, WR_NIC_ISR_MASK);
-	dev_info(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
+	dev_dbg(nic->dev, "%s: IER=%08x\n", __func__, wr_readl(nic, WR_NIC_IER));
 
 	return IRQ_HANDLED;
 }
@@ -474,7 +479,7 @@ static void wr_netpoll(struct net_device *netdev)
 
 static void wr_hw_enable_interrupts(struct wrnic *nic)
 {
-	printk(KERN_INFO "%s\n", __func__);
+	dev_dbg(nic->dev, "%s\n", __func__);
 	wr_writel(nic, WR_NIC_IER, WR_NIC_IER_TXI | WR_NIC_IER_RXI);
 }
 
@@ -554,12 +559,12 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size, bool do_ts)
 	nic->tx_head = txend;
 	h8 = nic->tx_head << 2;
 
-	dev_info(nic->dev, "%s -- timestamping: %s\n", __func__,
+	dev_dbg(nic->dev, "%s -- timestamping: %s\n", __func__,
 		do_ts ? "yes" : "no");
-	dev_info(nic->dev, "TX: txstart 0x%x, txend 0x%x len=0x%x, size=0x%x\n",
+	dev_dbg(nic->dev, "TX: txstart 0x%x, txend 0x%x len=0x%x, size=0x%x\n",
 		txstart, txend,	len, size);
 	dump_packet(data, size);
-	dev_info(nic->dev, "CRC: %08x\n", crc);
+	dev_dbg(nic->dev, "CRC: %08x\n", crc);
 
 	/*
 	 * fill in WR headers: size, flags and OOB
@@ -594,7 +599,7 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	char *data;
 	unsigned len;
 
-	printk(KERN_INFO "wr_start_xmit: len %d\n", skb->len);
+	dev_dbg(nic->dev, "wr_start_xmit: len %d\n", skb->len);
 
 	if (unlikely(skb->len > WR_NIC_BUFSIZE)) {
 		nic->stats.tx_errors++;
@@ -618,7 +623,7 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 		return 1;
 	}
 
-	dev_info(nic->dev, "%s: len %d\n", __func__, len);
+	dev_dbg(nic->dev, "%s: len %d\n", __func__, len);
 
 	shtx = skb_tx(skb);
 	if (nic->tx_hwtstamp_enable) {
@@ -648,18 +653,18 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
 		return -EFAULT;
 
-	dev_info(nic->dev, "%s\n", __func__);
+	dev_dbg(nic->dev, "%s\n", __func__);
 	/* reserve for future extensions of the interface */
 	if (config.flags)
 		return -EFAULT;
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_ON:
-		dev_info(nic->dev, "%s: hw tx timestamping ON\n", __func__);
+		dev_dbg(nic->dev, "%s: hw tx timestamping ON\n", __func__);
 		nic->tx_hwtstamp_enable = 1;
 		break;
 	case HWTSTAMP_TX_OFF:
-		dev_info(nic->dev, "%s: hw tx timestamping OFF\n", __func__);
+		dev_dbg(nic->dev, "%s: hw tx timestamping OFF\n", __func__);
 
 		nic->tx_hwtstamp_enable = 0;
 		break;
@@ -673,7 +678,7 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	 */
 	switch (config.rx_filter) {
 	case HWTSTAMP_FILTER_NONE:
-		dev_info(nic->dev, "%s - hw rx timestamping OFF\n", __func__);
+		dev_dbg(nic->dev, "%s - hw rx timestamping OFF\n", __func__);
 		nic->rx_hwtstamp_enable = 0;
 		break;
 	case HWTSTAMP_FILTER_ALL:
@@ -690,7 +695,7 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	case HWTSTAMP_FILTER_PTP_V2_EVENT:
 	case HWTSTAMP_FILTER_PTP_V2_SYNC:
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
-		dev_info(nic->dev, "%s - hw rx timestamping ON\n", __func__);
+		dev_dbg(nic->dev, "%s - hw rx timestamping ON\n", __func__);
 		nic->rx_hwtstamp_enable = 1;
 		config.rx_filter = HWTSTAMP_FILTER_ALL;
 		break;
@@ -714,7 +719,7 @@ wr_get_tx_hwtstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	u32 ts;
 
 	ts = wr_get_tx_hwtstamp(nic) & 0x7ffffff;
-	dev_info(nic->dev, "%s: TX timestamp: %d\n", __func__, ts);
+	dev_dbg(nic->dev, "%s: TX timestamp: %d\n", __func__, ts);
 	return put_user(ts, (__u32 __user *)rq->ifr_data);
 }
 
@@ -743,36 +748,36 @@ static void print_silly_test(struct wrnic *nic)
 	u32 reg;
 
 	reg = wr_readl(nic, WR_NIC_CTL);
-	dev_info(nic->dev, "Control register: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "Control register: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_IER);
-	dev_info(nic->dev, "Interrupt Enable register: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "Interrupt Enable register: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_ISR);
-	dev_info(nic->dev, "Interrupt Status register: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "Interrupt Status register: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_STAT);
-	dev_info(nic->dev, "Status register: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "Status register: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_TX_DESC_START);
-	dev_info(nic->dev, "TX desc start: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "TX desc start: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_TX_DESC_END);
-	dev_info(nic->dev, "TX desc end: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "TX desc end: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_RX_DESC_END);
-	dev_info(nic->dev, "RX desc end: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "RX desc end: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_RX_DESC_END);
-	dev_info(nic->dev, "RX desc end: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "RX desc end: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_TX_DESC_END);
-	dev_info(nic->dev, "TX desc end: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "TX desc end: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_TX_OFFSET);
-	dev_info(nic->dev, "TX offset: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "TX offset: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_RX_OFFSET);
-	dev_info(nic->dev, "RX offset: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "RX offset: 0x%08x\n", reg);
 	reg = wr_readl(nic, WR_NIC_RX_PENDING);
-	dev_info(nic->dev, "RX pending: 0x%08x\n", reg);
+	dev_dbg(nic->dev, "RX pending: 0x%08x\n", reg);
 }
 
 static int wr_open(struct net_device *netdev)
 {
 	struct wrnic *nic = netdev_priv(netdev);
 
-	printk(KERN_INFO "wr_open\n");
+	dev_dbg(nic->dev, "wr_open\n");
 
 	if (!is_valid_ether_addr(netdev->dev_addr))
 		return -EADDRNOTAVAIL;
@@ -794,7 +799,7 @@ static int wr_open(struct net_device *netdev)
 	napi_enable(&nic->napi);
 
 	print_silly_test(nic);
-	dev_info(nic->dev, "wr_open done\n");
+	dev_dbg(nic->dev, "wr_open done\n");
 
 	return 0;
 }
@@ -806,7 +811,7 @@ static int wr_close(struct net_device *netdev)
 	/* disable device, etc */
 	/* beep beep beep */
 
-	dev_info(nic->dev, "%s\n", __func__);
+	dev_dbg(nic->dev, "%s\n", __func__);
 
 	napi_disable(&nic->napi);
 	if (!netif_queue_stopped(netdev))
