@@ -53,6 +53,7 @@ struct wrnic {
 	unsigned int		tx_head;
 	atomic_t		tx_count;
 	atomic_t		tx_hwtag;
+	int			rx_hwtstamp;
 	int			rx_hwtstamp_enable;
 	int			tx_hwtstamp_enable;
 	struct platform_device	*pdev;
@@ -233,27 +234,6 @@ static u32 wr_get_rx_hwtstamp(struct wrnic *nic, unsigned st8)
 }
 
 /*
- * In WR we're only interested in the hardware's "raw" time, therefore
- * leave the other two entries blank.
- * A WR device ticks synchronously every 8ns (==freq 125MHz). A counter of
- * these ticks is what we get in the lower 27 bits of the 'timestamp' field
- * of a WR header.
- */
-static void
-__wr_rx_hwtstamp(struct wrnic *nic, struct sk_buff *skb, unsigned start8)
-{
-	struct skb_shared_hwtstamps *stamps = skb_hwtstamps(skb);
-	__u32 *hwts = (__u32 *)&stamps->hwtstamp;
-	/* 125MHz ticks into ns */
-	u32 ts = wr_get_rx_hwtstamp(nic, start8) & 0x7ffffff;
-
-	memset(stamps, 0, sizeof(*stamps));
-	/* @fixme this doesn't take into account overflow */
-	*hwts = ts;
-	dev_dbg(nic->dev, "rx ticks from endpoint: %d.\n", ts);
-}
-
-/*
  * There are three fields in an RX WR header:
  * ||	size	|	flags	|	OOB	|	tstamp	||
  * ||	32b	|	32b	|	32b	|	32b	||
@@ -293,9 +273,15 @@ static int wr_rx_frame(struct wrnic *nic)
 	/* @fixme ignore the checksum for the time being */
 	skb->ip_summed = CHECKSUM_UNNECESSARY;
 
-	/* pass up the timestamp before telling netif that we're done */
+	/*
+	 * In WR we're only interested in the hardware's "raw" time, therefore
+	 * leave the other two entries blank.
+	 * A WR device ticks synchronously every 8ns (==freq 125MHz). A counter
+	 * of these ticks is what we get in the lower 27 bits of the 'timestamp'
+	 * field of a WR header.
+	 */
 	if (nic->rx_hwtstamp_enable)
-		__wr_rx_hwtstamp(nic, skb, start8);
+		nic->rx_hwtstamp = wr_get_rx_hwtstamp(nic, start8) & 0x7ffffff;
 
 	netdev->last_rx = jiffies;
 	nic->stats.rx_packets++;
@@ -724,6 +710,20 @@ wr_get_tx_hwtstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	return put_user(ts, (__u32 __user *)rq->ifr_data);
 }
 
+/*
+ * ditto -- HACK HACK HACK
+ */
+static int
+wr_get_rx_hwtstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
+{
+	struct wrnic *nic = netdev_priv(netdev);
+	u32 ts;
+
+	ts = nic->rx_hwtstamp;
+	dev_dbg(nic->dev, "%s: RX timestamp: %d\n", __func__, ts);
+	return put_user(ts, (__u32 __user *)rq->ifr_data);
+}
+
 static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 {
 	switch (cmd) {
@@ -731,6 +731,8 @@ static int wr_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 		return wr_tstamp_ioctl(netdev, rq, cmd);
 	case WR_MCH_IOCGTXHWTSTAMP:
 		return wr_get_tx_hwtstamp_ioctl(netdev, rq, cmd);
+	case WR_MCH_IOCGRXHWTSTAMP:
+		return wr_get_rx_hwtstamp_ioctl(netdev, rq, cmd);
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -888,6 +890,7 @@ static int __devinit wr_probe(struct platform_device *pdev)
 	atomic_set(&nic->tx_hwtag, 0);
 	nic->tx_hwtstamp_enable = 0;
 	nic->rx_hwtstamp_enable = 0;
+	nic->rx_hwtstamp = 0;
 	nic->regs = ioremap(regs->start, regs->end - regs->start + 1);
 	if (!nic->regs) {
 		if (netif_msg_probe(nic))

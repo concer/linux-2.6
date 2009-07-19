@@ -14,5 +14,6 @@
 #include <linux/sockios.h>
 
 #define WR_MCH_IOCGTXHWTSTAMP	SIOCDEVPRIVATE
+#define WR_MCH_IOCGRXHWTSTAMP	((SIOCDEVPRIVATE) + 1)
 
 #endif /* _LINUX_IF_WR_H */
