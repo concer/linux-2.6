@@ -551,6 +551,8 @@ static void __wr_hw_tx(struct wrnic *nic, char *data, unsigned size, bool do_ts)
 	nic->tx_head = txend;
 	h8 = nic->tx_head << 2;
 
+	dev_info(nic->dev, "%s -- timestamping: %s\n", __func__,
+		do_ts ? "yes" : "no");
 	dev_info(nic->dev, "TX: txstart 0x%x, txend 0x%x len=0x%x, size=0x%x\n",
 		txstart, txend,	len, size);
 	dump_packet(data, size);
@@ -616,7 +618,7 @@ static int wr_start_xmit(struct sk_buff *skb, struct net_device *netdev)
 	dev_info(nic->dev, "%s: len %d\n", __func__, len);
 
 	shtx = skb_tx(skb);
-	if (nic->tx_hwtstamp_enable && shtx->hardware) {
+	if (nic->tx_hwtstamp_enable) {
 		shtx->in_progress = 1;
 		__wr_hw_tx(nic, data, len, true);
 	} else {
@@ -643,15 +645,19 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	if (copy_from_user(&config, rq->ifr_data, sizeof(config)))
 		return -EFAULT;
 
+	dev_info(nic->dev, "%s\n", __func__);
 	/* reserve for future extensions of the interface */
 	if (config.flags)
 		return -EFAULT;
 
 	switch (config.tx_type) {
 	case HWTSTAMP_TX_ON:
+		dev_info(nic->dev, "%s: hw tx timestamping ON\n", __func__);
 		nic->tx_hwtstamp_enable = 1;
 		break;
 	case HWTSTAMP_TX_OFF:
+		dev_info(nic->dev, "%s: hw tx timestamping OFF\n", __func__);
+
 		nic->tx_hwtstamp_enable = 0;
 		break;
 	default:
@@ -664,6 +670,7 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	 */
 	switch (config.rx_filter) {
 	case HWTSTAMP_FILTER_NONE:
+		dev_info(nic->dev, "%s - hw rx timestamping OFF\n", __func__);
 		nic->rx_hwtstamp_enable = 0;
 		break;
 	case HWTSTAMP_FILTER_ALL:
@@ -680,6 +687,7 @@ static int wr_tstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	case HWTSTAMP_FILTER_PTP_V2_EVENT:
 	case HWTSTAMP_FILTER_PTP_V2_SYNC:
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
+		dev_info(nic->dev, "%s - hw rx timestamping ON\n", __func__);
 		nic->rx_hwtstamp_enable = 1;
 		config.rx_filter = HWTSTAMP_FILTER_ALL;
 		break;
@@ -703,6 +711,7 @@ wr_get_tx_hwtstamp_ioctl(struct net_device *netdev, struct ifreq *rq, int cmd)
 	u32 ts;
 
 	ts = wr_get_tx_hwtstamp(nic) & 0x7ffffff;
+	dev_info(nic->dev, "%s: TX timestamp: %d\n", __func__, ts);
 	return put_user(ts, (__u32 __user *)rq->ifr_data);
 }
 
