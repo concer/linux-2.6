@@ -243,13 +243,14 @@ static void
 __wr_rx_hwtstamp(struct wrnic *nic, struct sk_buff *skb, unsigned start8)
 {
 	struct skb_shared_hwtstamps *stamps = skb_hwtstamps(skb);
+	__u32 *hwts = (__u32 *)&stamps->hwtstamp;
 	/* 125MHz ticks into ns */
-	u32 ns = (wr_get_rx_hwtstamp(nic, start8) & 0x7ffffff) << 3;
+	u32 ts = wr_get_rx_hwtstamp(nic, start8) & 0x7ffffff;
 
 	memset(stamps, 0, sizeof(*stamps));
 	/* @fixme this doesn't take into account overflow */
-	stamps->hwtstamp = ns_to_ktime(ns);
-	dev_dbg(nic->dev, "rx ticks from endpoint: %d.\n", ns >> 3);
+	*hwts = ts;
+	dev_dbg(nic->dev, "rx ticks from endpoint: %d.\n", ts);
 }
 
 /*
