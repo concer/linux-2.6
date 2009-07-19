@@ -366,13 +366,16 @@ static u32 wr_get_tx_hwtstamp(struct wrnic *nic)
 	u32 status = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPSTA);
 	u32 tag, ts;
 
-	/* if there's nothing, simply bail out */
-	if (WR_EPSTA_TSFIFO_EMPTY(status))
-		return 0;
-	tag	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSTAG);
-	ts	= wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSVAL);
+	do {
+		/* if there's nothing, simply bail out */
+		if (WR_EPSTA_TSFIFO_EMPTY(status))
+			return 0;
+		tag = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSTAG);
+		ts = wr_cs0_readl(nic, WR_FPGA_BASE_EP_UP1 + WR_EP_REG_EPTSVAL);
+	} while (tag != atomic_read(&nic->tx_hwtag));
+
 	dev_info(nic->dev, "tx ticks from endpoint: %d.\n", ts & 0x7ffffff);
-	return tag == atomic_read(&nic->tx_hwtag) ? ts : 0;
+	return ts;
 }
 
 static inline void wr_tx_handle_irq(struct wrnic *nic)
