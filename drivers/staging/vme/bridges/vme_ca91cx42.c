@@ -1600,6 +1600,7 @@ static int ca91cx42_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ca91cx42_bridge->driver_priv = ca91cx42_device;
+	ca91cx42_bridge->num = -1;
 
 	/* Enable the device */
 	retval = pci_enable_device(pdev);

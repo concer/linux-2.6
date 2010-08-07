@@ -1307,20 +1307,42 @@ EXPORT_SYMBOL(vme_slot_get);
 
 /* - Bridge Registration --------------------------------------------------- */
 
-static int vme_alloc_bus_num(void)
+/* call with vme_bus_num_mtx held */
+static int __vme_alloc_bus_num(int *bus)
 {
-	int i;
+	int index;
 
-	mutex_lock(&vme_bus_num_mtx);
-	for (i = 0; i < sizeof(vme_bus_numbers) * 8; i++) {
-		if (((vme_bus_numbers >> i) & 0x1) == 0) {
-			vme_bus_numbers |= (0x1 << i);
-			break;
+	if (*bus == -1) {
+		/* try to find a free bus number */
+		for (index = 0; index < VME_MAX_BRIDGES; index++) {
+			if (~vme_bus_numbers & 1 << index) {
+				*bus = index;
+				break;
+			}
+		}
+		if (index == VME_MAX_BRIDGES) {
+			pr_warn("vme: No bus numbers left\n");
+			return -ENODEV;
+		}
+	} else {
+		/* check if the given bus number is already in use */
+		if (vme_bus_numbers & (1 << *bus)) {
+			pr_warn("vme: bus number %d already in use\n", *bus);
+			return -EBUSY;
 		}
 	}
-	mutex_unlock(&vme_bus_num_mtx);
+	vme_bus_numbers |= 1 << *bus;
+	return 0;
+}
 
-	return i;
+static int vme_alloc_bus_num(int *bus)
+{
+	int ret;
+
+	mutex_lock(&vme_bus_num_mtx);
+	ret = __vme_alloc_bus_num(bus);
+	mutex_unlock(&vme_bus_num_mtx);
+	return ret;
 }
 
 static void vme_free_bus_num(int bus)
@@ -1336,7 +1358,9 @@ int vme_register_bridge(struct vme_bridge *bridge)
 	int retval;
 	int i;
 
-	bridge->num = vme_alloc_bus_num();
+	retval = vme_alloc_bus_num(&bridge->num);
+	if (retval)
+		return retval;
 
 	/* This creates 32 vme "slot" devices. This equates to a slot for each
 	 * ID available in a system conforming to the ANSI/VITA 1-1994
