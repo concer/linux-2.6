@@ -1352,6 +1352,11 @@ static void vme_free_bus_num(int bus)
 	mutex_unlock(&vme_bus_num_mtx);
 }
 
+/* Note: device_release(dev) throws a warning if dev->release isn't filled in */
+static void vme_dev_release(struct device *dev)
+{
+}
+
 int vme_register_bridge(struct vme_bridge *bridge)
 {
 	struct device *dev;
@@ -1372,6 +1377,7 @@ int vme_register_bridge(struct vme_bridge *bridge)
 
 		dev->parent = bridge->parent;
 		dev->bus = &vme_bus_type;
+		dev->release = vme_dev_release;
 		/*
 		 * We save a pointer to the bridge in platform_data so that we
 		 * can get to it later. We keep driver_data for use by the
