@@ -43,7 +43,7 @@
 static char driver_name[] = "vme_user";
 
 static int bus[USER_BUS_MAX];
-static int bus_num;
+static unsigned int bus_num;
 
 /* Currently Documentation/devices.txt defines the following for VME:
  *
