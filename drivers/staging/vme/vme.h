@@ -88,6 +88,7 @@ struct vme_resource {
 
 extern struct bus_type vme_bus_type;
 
+#define VME_MAX_BRIDGES		32
 #define VME_SLOT_CURRENT	-1
 #define VME_SLOT_ALL		-2
 

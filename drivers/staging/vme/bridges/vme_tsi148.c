@@ -2247,6 +2247,7 @@ static int tsi148_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	tsi148_bridge->driver_priv = tsi148_device;
+	tsi148_bridge->num = -1;
 
 	/* Enable the device */
 	retval = pci_enable_device(pdev);
