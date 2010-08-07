@@ -2612,8 +2612,6 @@ static void tsi148_remove(struct pci_dev *pdev)
 		kfree(master_image);
 	}
 
-	tsi148_irq_exit(bridge, pdev);
-
 	iounmap(bridge->base);
 
 	pci_release_regions(pdev);
