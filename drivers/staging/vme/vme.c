@@ -36,7 +36,7 @@
 
 /* Bitmask and mutex to keep track of bridge numbers */
 static unsigned int vme_bus_numbers;
-static DEFINE_MUTEX(vme_bus_num_mtx);
+static DEFINE_MUTEX(vme_buses_lock);
 
 static void __exit vme_exit(void);
 static int __init vme_init(void);
@@ -1307,7 +1307,7 @@ EXPORT_SYMBOL(vme_slot_get);
 
 /* - Bridge Registration --------------------------------------------------- */
 
-/* call with vme_bus_num_mtx held */
+/* call with vme_buses_lock held */
 static int __vme_alloc_bus_num(int *bus)
 {
 	int index;
@@ -1339,17 +1339,17 @@ static int vme_alloc_bus_num(int *bus)
 {
 	int ret;
 
-	mutex_lock(&vme_bus_num_mtx);
+	mutex_lock(&vme_buses_lock);
 	ret = __vme_alloc_bus_num(bus);
-	mutex_unlock(&vme_bus_num_mtx);
+	mutex_unlock(&vme_buses_lock);
 	return ret;
 }
 
 static void vme_free_bus_num(int bus)
 {
-	mutex_lock(&vme_bus_num_mtx);
+	mutex_lock(&vme_buses_lock);
 	vme_bus_numbers &= ~(0x1 << bus);
-	mutex_unlock(&vme_bus_num_mtx);
+	mutex_unlock(&vme_buses_lock);
 }
 
 /* Note: device_release(dev) throws a warning if dev->release isn't filled in */
