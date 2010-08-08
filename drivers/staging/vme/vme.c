@@ -34,8 +34,12 @@
 #include "vme.h"
 #include "vme_bridge.h"
 
-/* Bitmask and mutex to keep track of bridge numbers */
+/*
+ * List of registered buses (bridges) and available bus numbers, both protected
+ * by the same mutex.
+ */
 static unsigned int vme_bus_numbers;
+static LIST_HEAD(vme_buses_list);
 static DEFINE_MUTEX(vme_buses_lock);
 
 static void __exit vme_exit(void);
@@ -1308,8 +1312,9 @@ EXPORT_SYMBOL(vme_slot_get);
 /* - Bridge Registration --------------------------------------------------- */
 
 /* call with vme_buses_lock held */
-static int __vme_alloc_bus_num(int *bus)
+static int __vme_register_bus(struct vme_bridge *bridge)
 {
+	int *bus = &bridge->num;
 	int index;
 
 	if (*bus == -1) {
@@ -1331,24 +1336,26 @@ static int __vme_alloc_bus_num(int *bus)
 			return -EBUSY;
 		}
 	}
+	list_add_tail(&bridge->buses_list, &vme_buses_list);
 	vme_bus_numbers |= 1 << *bus;
 	return 0;
 }
 
-static int vme_alloc_bus_num(int *bus)
+static int vme_register_bus(struct vme_bridge *bridge)
 {
 	int ret;
 
 	mutex_lock(&vme_buses_lock);
-	ret = __vme_alloc_bus_num(bus);
+	ret = __vme_register_bus(bridge);
 	mutex_unlock(&vme_buses_lock);
 	return ret;
 }
 
-static void vme_free_bus_num(int bus)
+static void vme_unregister_bus(struct vme_bridge *bridge)
 {
 	mutex_lock(&vme_buses_lock);
-	vme_bus_numbers &= ~(0x1 << bus);
+	vme_bus_numbers &= ~(0x1 << bridge->num);
+	list_del(&bridge->buses_list);
 	mutex_unlock(&vme_buses_lock);
 }
 
@@ -1363,7 +1370,7 @@ int vme_register_bridge(struct vme_bridge *bridge)
 	int retval;
 	int i;
 
-	retval = vme_alloc_bus_num(&bridge->num);
+	retval = vme_register_bus(bridge);
 	if (retval)
 		return retval;
 
@@ -1399,7 +1406,7 @@ err_reg:
 		dev = &bridge->dev[i];
 		device_unregister(dev);
 	}
-	vme_free_bus_num(bridge->num);
+	vme_unregister_bus(bridge);
 	return retval;
 }
 EXPORT_SYMBOL(vme_register_bridge);
@@ -1414,7 +1421,7 @@ void vme_unregister_bridge(struct vme_bridge *bridge)
 		dev = &bridge->dev[i];
 		device_unregister(dev);
 	}
-	vme_free_bus_num(bridge->num);
+	vme_unregister_bus(bridge);
 }
 EXPORT_SYMBOL(vme_unregister_bridge);
 
