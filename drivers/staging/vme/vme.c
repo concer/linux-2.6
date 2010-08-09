@@ -32,7 +32,6 @@
 #include <linux/slab.h>
 
 #include "vme.h"
-#include "vme_bridge.h"
 
 /*
  * List of registered buses (bridges) and available bus numbers, both protected
