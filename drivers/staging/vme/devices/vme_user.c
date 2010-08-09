@@ -826,8 +826,8 @@ err_master:
 err_slave:
 	while (i > SLAVE_MINOR) {
 		i--;
-		vme_slave_free(image[i].resource);
 		buf_unalloc(i);
+		vme_slave_free(image[i].resource);
 	}
 err_class:
 	cdev_del(vme_user_cdev);
@@ -852,8 +852,8 @@ static int __devexit vme_user_remove(struct device *dev, int cur_bus, int cur_sl
 
 	for (i = SLAVE_MINOR; i < (SLAVE_MAX + 1); i++) {
 		vme_slave_set(image[i].resource, 0, 0, 0, 0, VME_A32, 0);
-		vme_slave_free(image[i].resource);
 		buf_unalloc(i);
+		vme_slave_free(image[i].resource);
 	}
 
 	/* Unregister device driver */
