@@ -31,7 +31,6 @@
 #include <linux/uaccess.h>
 
 #include "../vme.h"
-#include "../vme_bridge.h"
 #include "vme_ca91cx42.h"
 
 static int __init ca91cx42_init(void);

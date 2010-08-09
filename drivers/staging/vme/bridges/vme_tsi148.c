@@ -31,7 +31,6 @@
 #include <linux/uaccess.h>
 
 #include "../vme.h"
-#include "../vme_bridge.h"
 #include "vme_tsi148.h"
 
 static int __init tsi148_init(void);
