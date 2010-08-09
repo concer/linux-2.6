@@ -848,8 +848,10 @@ static int __devexit vme_user_remove(struct device *dev, int cur_bus, int cur_sl
 	}
 	class_destroy(vme_user_sysfs_class);
 
-	for (i = MASTER_MINOR; i < (MASTER_MAX + 1); i++)
+	for (i = MASTER_MINOR; i < (MASTER_MAX + 1); i++) {
 		kfree(image[i].kern_buf);
+		vme_master_free(image[i].resource);
+	}
 
 	for (i = SLAVE_MINOR; i < (SLAVE_MAX + 1); i++) {
 		buf_unalloc(i);
