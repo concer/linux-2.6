@@ -1599,6 +1599,7 @@ static int ca91cx42_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	}
 
 	ca91cx42_bridge->driver_priv = ca91cx42_device;
+	ca91cx42_bridge->owner = THIS_MODULE;
 	ca91cx42_bridge->num = -1;
 
 	/* Enable the device */
@@ -1772,7 +1773,7 @@ static int ca91cx42_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	/* Need to save ca91cx42_bridge pointer locally in link list for use in
 	 * ca91cx42_remove()
 	 */
-	retval = vme_register_bridge(ca91cx42_bridge);
+	retval = vme_register_bridge_ng(ca91cx42_bridge);
 	if (retval != 0) {
 		dev_err(&pdev->dev, "Chip Registration failed.\n");
 		goto err_reg;
@@ -1782,7 +1783,7 @@ static int ca91cx42_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	return 0;
 
-	vme_unregister_bridge(ca91cx42_bridge);
+	vme_unregister_bridge_ng(ca91cx42_bridge);
 err_reg:
 	ca91cx42_crcsr_exit(ca91cx42_bridge, pdev);
 err_lm:
@@ -1866,7 +1867,7 @@ static void ca91cx42_remove(struct pci_dev *pdev)
 	iowrite32(0x00F00000, bridge->base + VSI6_CTL);
 	iowrite32(0x00F00000, bridge->base + VSI7_CTL);
 
-	vme_unregister_bridge(ca91cx42_bridge);
+	vme_unregister_bridge_ng(ca91cx42_bridge);
 
 	ca91cx42_crcsr_exit(ca91cx42_bridge, pdev);
 

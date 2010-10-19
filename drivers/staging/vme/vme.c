@@ -1812,9 +1812,9 @@ static int vme_bus_remove_ng(struct device *dev)
 
 struct bus_type vme_bus_type = {
 	.name = "vme",
-	.match = vme_bus_match,
-	.probe = vme_bus_probe,
-	.remove = vme_bus_remove,
+	.match = vme_bus_match_ng,
+	.probe = vme_bus_probe_ng,
+	.remove = vme_bus_remove_ng,
 };
 EXPORT_SYMBOL(vme_bus_type);
 
