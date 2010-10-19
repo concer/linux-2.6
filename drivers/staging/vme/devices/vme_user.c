@@ -851,7 +851,6 @@ static int __devexit vme_user_remove(struct device *dev, int cur_bus, int cur_sl
 		kfree(image[i].kern_buf);
 
 	for (i = SLAVE_MINOR; i < (SLAVE_MAX + 1); i++) {
-		vme_slave_set(image[i].resource, 0, 0, 0, 0, VME_A32, 0);
 		buf_unalloc(i);
 		vme_slave_free(image[i].resource);
 	}
