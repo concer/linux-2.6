@@ -98,7 +98,7 @@ struct vme_device_id {
 };
 
 /**
- * struct vme_driver_ng - represent a VME driver
+ * struct vme_driver - represent a VME driver
  * @name: driver name
  * @match: callback for matching devices
  * @probe: callback for device binding
@@ -108,7 +108,7 @@ struct vme_device_id {
  * @devices: pointer to the first device controlled by this driver. From this
  * first device all others can be retrieved by traversing a list.
  */
-struct vme_driver_ng {
+struct vme_driver {
 	char *name;
 	int (*match)(struct device *, unsigned int, unsigned int);
 	int (*probe)(struct device *, unsigned int, unsigned int);
@@ -117,7 +117,7 @@ struct vme_driver_ng {
 	struct device_driver driver;
 	struct device *devices;
 };
-#define to_vme_driver_ng(x) container_of((x), struct vme_driver_ng, driver)
+#define to_vme_driver(x) container_of((x), struct vme_driver, driver)
 
 #define VME_CRCSR_BUF_SIZE (508*1024)
 #define VME_SLOTS_MAX 32
@@ -294,7 +294,7 @@ void vme_free_consistent(struct vme_resource *, size_t,  void *,
 
 size_t vme_get_size(struct vme_resource *);
 
-struct vme_resource *vme_slave_request_ng(struct vme_bridge *bridge,
+struct vme_resource *vme_slave_request(struct vme_bridge *bridge,
 					  vme_address_t address,
 					  vme_cycle_t cycle);
 int vme_slave_set(struct vme_resource *, int, unsigned long long,
@@ -303,7 +303,7 @@ int vme_slave_get(struct vme_resource *, int *, unsigned long long *,
 	unsigned long long *, dma_addr_t *, vme_address_t *, vme_cycle_t *);
 void vme_slave_free(struct vme_resource *);
 
-struct vme_resource *vme_master_request_ng(struct vme_bridge *bridge,
+struct vme_resource *vme_master_request(struct vme_bridge *bridge,
 					   vme_address_t address,
 					   vme_cycle_t cycle,
 					   vme_width_t dwidth);
@@ -317,7 +317,7 @@ unsigned int vme_master_rmw(struct vme_resource *, unsigned int, unsigned int,
 	unsigned int, loff_t);
 void vme_master_free(struct vme_resource *);
 
-struct vme_resource *vme_dma_request_ng(struct vme_bridge *bridge, vme_dma_route_t route);
+struct vme_resource *vme_dma_request(struct vme_bridge *bridge, vme_dma_route_t route);
 struct vme_dma_list *vme_new_dma_list(struct vme_resource *);
 struct vme_dma_attr *vme_dma_pattern_attribute(u32, vme_pattern_t);
 struct vme_dma_attr *vme_dma_pci_attribute(dma_addr_t);
@@ -330,12 +330,12 @@ int vme_dma_list_exec(struct vme_dma_list *);
 int vme_dma_list_free(struct vme_dma_list *);
 int vme_dma_free(struct vme_resource *);
 
-int vme_irq_request_ng(struct vme_bridge *bridge, int level, int statid,
+int vme_irq_request(struct vme_bridge *bridge, int level, int statid,
 		       void (*callback)(int, int, void *), void *priv_data);
-void vme_irq_free_ng(struct vme_bridge *bridge, int level, int statid);
-int vme_irq_generate_ng(struct vme_bridge *bridge, int level, int statid);
+void vme_irq_free(struct vme_bridge *bridge, int level, int statid);
+int vme_irq_generate(struct vme_bridge *bridge, int level, int statid);
 
-struct vme_resource *vme_lm_request_ng(struct vme_bridge *bridge);
+struct vme_resource *vme_lm_request(struct vme_bridge *bridge);
 int vme_lm_count(struct vme_resource *);
 int vme_lm_set(struct vme_resource *, unsigned long long, vme_address_t,
 	vme_cycle_t);
@@ -347,16 +347,16 @@ void vme_lm_free(struct vme_resource *);
 
 int vme_slot_get(struct device *);
 
-int vme_register_driver_ng(struct vme_driver_ng *vme_driver, unsigned int n_devs);
-void vme_unregister_driver_ng(struct vme_driver_ng *vme_driver);
+int vme_register_driver(struct vme_driver *vme_driver, unsigned int n_devs);
+void vme_unregister_driver(struct vme_driver *vme_driver);
 
 struct vme_bridge *vme_get_bridge(unsigned int bus_id);
 void vme_put_bridge(struct vme_bridge *bridge);
 
 /* functions for VME bridges */
 void vme_irq_handler(struct vme_bridge *, int, int);
-int vme_register_bridge_ng(struct vme_bridge *bridge);
-void vme_unregister_bridge_ng(struct vme_bridge *bridge);
+int vme_register_bridge(struct vme_bridge *bridge);
+void vme_unregister_bridge(struct vme_bridge *bridge);
 
 
 #endif /* _VME_H_ */

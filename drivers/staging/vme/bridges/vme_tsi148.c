@@ -2464,7 +2464,7 @@ static int tsi148_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_crcsr;
 	}
 
-	retval = vme_register_bridge_ng(tsi148_bridge);
+	retval = vme_register_bridge(tsi148_bridge);
 	if (retval != 0) {
 		dev_err(&pdev->dev, "Chip Registration failed.\n");
 		goto err_reg;
@@ -2587,7 +2587,7 @@ static void tsi148_remove(struct pci_dev *pdev)
 
 	tsi148_irq_exit(tsi148_bridge, pdev);
 
-	vme_unregister_bridge_ng(tsi148_bridge);
+	vme_unregister_bridge(tsi148_bridge);
 
 	tsi148_crcsr_exit(tsi148_bridge, pdev);
 

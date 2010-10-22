@@ -289,7 +289,7 @@ static int vme_check_window(vme_address_t aspace, unsigned long long vme_base,
  * identifier.
  */
 struct vme_resource
-*vme_slave_request_ng(struct vme_bridge *bridge, vme_address_t address, vme_cycle_t cycle)
+*vme_slave_request(struct vme_bridge *bridge, vme_address_t address, vme_cycle_t cycle)
 {
 	struct list_head *slave_pos = NULL;
 	struct vme_slave_resource *allocated_image = NULL;
@@ -342,7 +342,7 @@ err_alloc:
 err_image:
 	return NULL;
 }
-EXPORT_SYMBOL(vme_slave_request_ng);
+EXPORT_SYMBOL(vme_slave_request);
 
 int vme_slave_set(struct vme_resource *resource, int enabled,
 	unsigned long long vme_base, unsigned long long size,
@@ -437,7 +437,7 @@ EXPORT_SYMBOL(vme_slave_free);
  * identifier.
  */
 struct vme_resource
-*vme_master_request_ng(struct vme_bridge *bridge, vme_address_t address,
+*vme_master_request(struct vme_bridge *bridge, vme_address_t address,
 		      vme_cycle_t cycle, vme_width_t dwidth)
 {
 	struct list_head *master_pos = NULL;
@@ -495,7 +495,7 @@ err_alloc:
 err_image:
 	return NULL;
 }
-EXPORT_SYMBOL(vme_master_request_ng);
+EXPORT_SYMBOL(vme_master_request);
 
 int vme_master_set(struct vme_resource *resource, int enabled,
 	unsigned long long vme_base, unsigned long long size,
@@ -689,7 +689,7 @@ EXPORT_SYMBOL(vme_master_free);
  * identifier.
  */
 struct vme_resource
-*vme_dma_request_ng(struct vme_bridge *bridge, vme_dma_route_t route)
+*vme_dma_request(struct vme_bridge *bridge, vme_dma_route_t route)
 {
 	struct list_head *dma_pos = NULL;
 	struct vme_dma_resource *allocated_ctrlr = NULL;
@@ -744,7 +744,7 @@ err_alloc:
 err_ctrlr:
 	return NULL;
 }
-EXPORT_SYMBOL(vme_dma_request_ng);
+EXPORT_SYMBOL(vme_dma_request);
 
 /*
  * Start new list
@@ -1028,7 +1028,7 @@ void vme_irq_handler(struct vme_bridge *bridge, int level, int statid)
 }
 EXPORT_SYMBOL(vme_irq_handler);
 
-int vme_irq_request_ng(struct vme_bridge *bridge, int level, int statid,
+int vme_irq_request(struct vme_bridge *bridge, int level, int statid,
 		       void (*callback)(int, int, void *), void *priv_data)
 {
 	if ((level < 1) || (level > 7)) {
@@ -1060,9 +1060,9 @@ int vme_irq_request_ng(struct vme_bridge *bridge, int level, int statid,
 
 	return 0;
 }
-EXPORT_SYMBOL(vme_irq_request_ng);
+EXPORT_SYMBOL(vme_irq_request);
 
-void vme_irq_free_ng(struct vme_bridge *bridge, int level, int statid)
+void vme_irq_free(struct vme_bridge *bridge, int level, int statid)
 {
 	if ((level < 1) || (level > 7)) {
 		printk(KERN_ERR "Invalid interrupt level\n");
@@ -1087,9 +1087,9 @@ void vme_irq_free_ng(struct vme_bridge *bridge, int level, int statid)
 
 	mutex_unlock(&bridge->irq_mtx);
 }
-EXPORT_SYMBOL(vme_irq_free_ng);
+EXPORT_SYMBOL(vme_irq_free);
 
-int vme_irq_generate_ng(struct vme_bridge *bridge, int level, int statid)
+int vme_irq_generate(struct vme_bridge *bridge, int level, int statid)
 {
 	if ((level < 1) || (level > 7)) {
 		printk(KERN_WARNING "Invalid interrupt level\n");
@@ -1103,12 +1103,12 @@ int vme_irq_generate_ng(struct vme_bridge *bridge, int level, int statid)
 
 	return bridge->irq_generate(bridge, level, statid);
 }
-EXPORT_SYMBOL(vme_irq_generate_ng);
+EXPORT_SYMBOL(vme_irq_generate);
 
 /*
  * Request the location monitor, return resource or NULL
  */
-struct vme_resource *vme_lm_request_ng(struct vme_bridge *bridge)
+struct vme_resource *vme_lm_request(struct vme_bridge *bridge)
 {
 	struct list_head *lm_pos = NULL;
 	struct vme_lm_resource *allocated_lm = NULL;
@@ -1159,7 +1159,7 @@ err_alloc:
 err_lm:
 	return NULL;
 }
-EXPORT_SYMBOL(vme_lm_request_ng);
+EXPORT_SYMBOL(vme_lm_request);
 
 int vme_lm_count(struct vme_resource *resource)
 {
@@ -1360,43 +1360,43 @@ static void vme_unregister_bus(struct vme_bridge *bridge)
 }
 
 /**
- * vme_register_bridge_ng - register a VME bridge in the VME core
+ * vme_register_bridge - register a VME bridge in the VME core
  * @bridge:	VME bridge to register
  *
  * Upon calling this function, the bridge must be ready to process requests.
  */
-int vme_register_bridge_ng(struct vme_bridge *bridge)
+int vme_register_bridge(struct vme_bridge *bridge)
 {
 	return vme_register_bus(bridge);
 }
-EXPORT_SYMBOL(vme_register_bridge_ng);
+EXPORT_SYMBOL(vme_register_bridge);
 
 /**
  * vme_unregister_bridge_nr - unregister a VME bridge from the VME core
  * @bridge:	VME bridge to unregister
  */
-void vme_unregister_bridge_ng(struct vme_bridge *bridge)
+void vme_unregister_bridge(struct vme_bridge *bridge)
 {
 	vme_unregister_bus(bridge);
 }
-EXPORT_SYMBOL(vme_unregister_bridge_ng);
+EXPORT_SYMBOL(vme_unregister_bridge);
 
 
 /* - Driver Registration --------------------------------------------------- */
 
-static void vme_dev_release_ng(struct device *dev)
+static void vme_dev_release(struct device *dev)
 {
 	kfree(to_vme_dev(dev));
 }
 
 /**
- * vme_unregister_driver_ng - unregister a driver from the VME core
+ * vme_unregister_driver - unregister a driver from the VME core
  * @vme_driver:	VME driver to unregister
  *
  * First, all devices associated to the driver are unregistered; then the
  * driver is removed from the core.
  */
-void vme_unregister_driver_ng(struct vme_driver_ng *vme_driver)
+void vme_unregister_driver(struct vme_driver *vme_driver)
 {
 	struct device *dev = vme_driver->devices;
 
@@ -1408,10 +1408,10 @@ void vme_unregister_driver_ng(struct vme_driver_ng *vme_driver)
 	}
 	driver_unregister(&vme_driver->driver);
 }
-EXPORT_SYMBOL(vme_unregister_driver_ng);
+EXPORT_SYMBOL(vme_unregister_driver);
 
 static int
-__vme_register_driver_bus(struct vme_driver_ng *vme_driver, struct vme_bridge *bridge, unsigned int n_devs)
+__vme_register_driver_bus(struct vme_driver *vme_driver, struct vme_bridge *bridge, unsigned int n_devs)
 {
 	unsigned int id;
 	int error;
@@ -1425,7 +1425,7 @@ __vme_register_driver_bus(struct vme_driver_ng *vme_driver, struct vme_bridge *b
 			break;
 		}
 		vme_dev->dev.platform_data = vme_driver;
-		vme_dev->dev.release = vme_dev_release_ng;
+		vme_dev->dev.release = vme_dev_release;
 		vme_dev->dev.parent = bridge->parent;
 		vme_dev->dev.bus = &vme_bus_type;
 		vme_dev->bus_id = bridge->num;
@@ -1449,7 +1449,7 @@ __vme_register_driver_bus(struct vme_driver_ng *vme_driver, struct vme_bridge *b
 	return error;
 }
 
-static int __vme_register_driver(struct vme_driver_ng *vme_driver, unsigned n_devs)
+static int __vme_register_driver(struct vme_driver *vme_driver, unsigned n_devs)
 {
 	struct vme_bridge *bridge;
 	int error;
@@ -1478,7 +1478,7 @@ static int __vme_register_driver(struct vme_driver_ng *vme_driver, unsigned n_de
 }
 
 /**
- * vme_register_driver_ng - register a VME driver
+ * vme_register_driver - register a VME driver
  * @vme_driver:	VME driver to register in the VME core
  * @n_devs:	Number of devices (0 to n-1) to be matched for each bus
  *
@@ -1488,7 +1488,7 @@ static int __vme_register_driver(struct vme_driver_ng *vme_driver, unsigned n_de
  * If there is a match, .probe is called; otherwise the created device is
  * removed.
  */
-int vme_register_driver_ng(struct vme_driver_ng *vme_driver, unsigned int n_devs)
+int vme_register_driver(struct vme_driver *vme_driver, unsigned int n_devs)
 {
 	int error;
 
@@ -1504,16 +1504,16 @@ int vme_register_driver_ng(struct vme_driver_ng *vme_driver, unsigned int n_devs
 	if (!error && !vme_driver->devices)
 		error = -ENODEV;
 	if (error)
-		vme_unregister_driver_ng(vme_driver);
+		vme_unregister_driver(vme_driver);
 	return error;
 }
-EXPORT_SYMBOL(vme_register_driver_ng);
+EXPORT_SYMBOL(vme_register_driver);
 
 /* - Bus Registration ------------------------------------------------------ */
 
-static int vme_bus_match_ng(struct device *dev, struct device_driver *drv)
+static int vme_bus_match(struct device *dev, struct device_driver *drv)
 {
-	struct vme_driver_ng *vme_driver = to_vme_driver_ng(drv);
+	struct vme_driver *vme_driver = to_vme_driver(drv);
 
 	if (dev->platform_data == vme_driver) {
 		struct vme_dev *vme_dev = to_vme_dev(dev);
@@ -1526,9 +1526,9 @@ static int vme_bus_match_ng(struct device *dev, struct device_driver *drv)
 	return 0;
 }
 
-static int vme_bus_probe_ng(struct device *dev)
+static int vme_bus_probe(struct device *dev)
 {
-	struct vme_driver_ng *vme_driver = dev->platform_data;
+	struct vme_driver *vme_driver = dev->platform_data;
 
 	if (vme_driver->probe) {
 		struct vme_dev *vme_dev = to_vme_dev(dev);
@@ -1538,9 +1538,9 @@ static int vme_bus_probe_ng(struct device *dev)
 	return 0;
 }
 
-static int vme_bus_remove_ng(struct device *dev)
+static int vme_bus_remove(struct device *dev)
 {
-	struct vme_driver_ng *vme_driver = dev->platform_data;
+	struct vme_driver *vme_driver = dev->platform_data;
 
 	if (vme_driver->remove) {
 		struct vme_dev *vme_dev = to_vme_dev(dev);
@@ -1552,9 +1552,9 @@ static int vme_bus_remove_ng(struct device *dev)
 
 struct bus_type vme_bus_type = {
 	.name = "vme",
-	.match = vme_bus_match_ng,
-	.probe = vme_bus_probe_ng,
-	.remove = vme_bus_remove_ng,
+	.match = vme_bus_match,
+	.probe = vme_bus_probe,
+	.remove = vme_bus_remove,
 };
 EXPORT_SYMBOL(vme_bus_type);
 

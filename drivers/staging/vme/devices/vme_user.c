@@ -602,7 +602,7 @@ static void buf_unalloc(int num)
 	}
 }
 
-static struct vme_driver_ng vme_user_driver_ng = {
+static struct vme_driver vme_user_driver = {
 	.name = driver_name,
 	.match = vme_user_match,
 	.probe = vme_user_probe,
@@ -629,7 +629,7 @@ static int __init vme_user_init(void)
 		bus_num = USER_BUS_MAX;
 	}
 
-	return vme_register_driver_ng(&vme_user_driver_ng, 1);
+	return vme_register_driver(&vme_user_driver, 1);
 }
 
 /* NOTE: This only supports one device per bus */
@@ -703,7 +703,7 @@ vme_user_probe(struct device *dev, unsigned int bus_id, unsigned int id)
 		 * supporting A16 addressing, so we request A24 supported
 		 * by all windows.
 		 */
-		image[i].resource = vme_slave_request_ng(bridges[0], VME_A24, VME_SCT);
+		image[i].resource = vme_slave_request(bridges[0], VME_A24, VME_SCT);
 		if (image[i].resource == NULL) {
 			printk(KERN_WARNING "Unable to allocate slave "
 				"resource\n");
@@ -728,7 +728,7 @@ vme_user_probe(struct device *dev, unsigned int bus_id, unsigned int id)
 	 */
 	for (i = MASTER_MINOR; i < (MASTER_MAX + 1); i++) {
 		/* XXX Need to properly request attributes */
-		image[i].resource = vme_master_request_ng(bridges[0], VME_A32, VME_SCT, VME_D32);
+		image[i].resource = vme_master_request(bridges[0], VME_A32, VME_SCT, VME_D32);
 		if (image[i].resource == NULL) {
 			printk(KERN_WARNING "Unable to allocate master "
 				"resource\n");
@@ -858,7 +858,7 @@ static int __devexit vme_user_remove(struct device *dev, unsigned int bus_id, un
 
 static void __exit vme_user_exit(void)
 {
-	vme_unregister_driver_ng(&vme_user_driver_ng);
+	vme_unregister_driver(&vme_user_driver);
 }
 
 
