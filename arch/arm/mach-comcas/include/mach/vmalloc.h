@@ -1,0 +1,1 @@
+#define VMALLOC_END     (PAGE_OFFSET + 0x18000000)
