@@ -2,6 +2,7 @@
  * Low-level IRQ helper macros for Comcas platforms
  */
 #include <mach/hardware.h>
+#define HAVE_GET_IRQNR_PREAMBLE
 
 .macro	disable_fiq
 .endm

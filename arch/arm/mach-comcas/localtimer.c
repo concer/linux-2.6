@@ -14,6 +14,5 @@
 #include <asm/io.h>
 #include <asm/irq.h>
 
-extern void __iomem *gic_cpu_base_addr;
 
 

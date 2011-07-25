@@ -21,9 +21,6 @@
 
 #define COMCAS_REFCOUNTER	(__io_address (COMCAS_SYS_BASE) + COMCAS_SYS_24MHz_OFFSET)
 
-/* used by entry-macro.S */
-void __iomem *gic_cpu_base_addr;
-
 static void timer_set_mode (enum clock_event_mode mode, struct clock_event_device *clk)
 {
     unsigned long ctrl;
