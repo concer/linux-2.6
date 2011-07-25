@@ -152,8 +152,6 @@ static void __init comcas_init (void)
 }
 
 MACHINE_START(COMCAS, "COMCAS")
-	.phys_io	= COMCAS_UART0_BASE,
-	.io_pg_offst	= (IO_ADDRESS(COMCAS_UART0_BASE) >> 18) & 0xfffc,
 	.boot_params	= 0x00000100,
 	.map_io		= comcas_map_io,
 	.init_irq	= gic_init_irq,

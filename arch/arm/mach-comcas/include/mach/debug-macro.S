@@ -2,12 +2,11 @@
  * Debugging macro include header
 */
 
-.macro	addruart,rx
-    mrc	p15, 0, \rx, c1, c0
-    tst	\rx, #1			@ MMU enabled?
-    moveq	\rx,      #0x10000000
-    movne	\rx,      #0xf0000000	@ virtual base
-    orr	\rx, \rx, #0x00009000
+.macro	addruart, rp, rv
+    mov		\rp,	#0x10000000	@ physical base
+    mov		\rv,	#0xf0000000	@ virtual base
+    orr		\rp, \rp, #0x00009000
+    orr		\rv, \rv, #0x00009000
 .endm
 
 .macro  senduart,rd,rx
