@@ -2,6 +2,7 @@
 #include <linux/errno.h>
 #include <linux/init.h>
 #include <linux/slab.h>
+#include <linux/irq.h>
 #include <linux/tty.h>
 #include <linux/tty_flip.h>
 #include <linux/serial.h>
@@ -10,6 +11,8 @@
 #include <linux/console.h>
 #include <asm/io.h>
 #include <mach/hardware.h>
+
+#include "core.h"
 
 #define DRIVER_VERSION "v1.0"
 #define DRIVER_AUTHOR "TIMA Laboratory"
@@ -52,9 +55,6 @@ MODULE_LICENSE ("GPL");
 #define warn(format, arg...) printk(KERN_WARNING "%s: " format "\n" , MY_NAME , ## arg)
 
 static struct timer_list *timer = NULL;
-
-void comcas_gic_mask_irq (unsigned int irq);
-void comcas_gic_unmask_irq (unsigned int irq);
 
 static void comcas_stop_tx (struct uart_port *port)
 {
@@ -183,7 +183,9 @@ static int comcas_startup (struct uart_port *port)
     /* do any hardware initialization needed here */
 
     //enable gic
-    comcas_gic_unmask_irq (IRQ_UART0);
+    struct irq_data irqd;
+    irqd.irq = IRQ_UART0;
+    comcas_gic_unmask_irq (&irqd);
     
     //enable tty
     UART_PUT_IRQ_ENABLE (port, 1);

@@ -8,5 +8,7 @@
 #include <asm/io.h>
 
 void __init comcas_timer_init (void);
+void comcas_gic_unmask_irq (struct irq_data *d);
+
 
 #endif

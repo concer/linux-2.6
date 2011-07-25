@@ -68,15 +68,15 @@ static inline unsigned long comcas_get_gic_irq_mask (int irq)
 
 }
 
-static void comcas_gic_ack_irq (unsigned int irq)
+static void comcas_gic_ack_irq (struct irq_data *d)
 {
 }
 
-void comcas_gic_mask_irq (unsigned int irq)
+void comcas_gic_mask_irq (struct irq_data *d)
 {
     unsigned long       mask, val;
 
-    mask = comcas_get_gic_irq_mask (irq);
+    mask = comcas_get_gic_irq_mask (d->irq);
     if (!mask)
         return;
 
@@ -86,11 +86,11 @@ void comcas_gic_mask_irq (unsigned int irq)
     spin_unlock(&irq_controller_lock);
 }
 
-void comcas_gic_unmask_irq (unsigned int irq)
+void comcas_gic_unmask_irq (struct irq_data *d)
 {
     unsigned long       mask, val;
 
-    mask = comcas_get_gic_irq_mask (irq);
+    mask = comcas_get_gic_irq_mask (d->irq);
     if (!mask)
         return;
 
@@ -110,9 +110,9 @@ static int comcas_gic_set_cpu (unsigned int irq, const struct cpumask *dest)
 static struct irq_chip comcas_gic_chip =
 {
     .name       = "COMCAS_GIC",
-    .ack        = comcas_gic_ack_irq,
-    .mask       = comcas_gic_mask_irq,
-    .unmask     = comcas_gic_unmask_irq,
+    .irq_ack	= comcas_gic_ack_irq,
+    .irq_mask	= comcas_gic_mask_irq,
+    .irq_unmask	= comcas_gic_unmask_irq,
     #ifdef CONFIG_SMP
     .set_affinity   = comcas_gic_set_cpu,
     #endif
@@ -131,9 +131,8 @@ static void __init comcas_gic_init (void)
     for (i = 0; i < nimplemented_irqs; i++)
     {
         irq = implemented_irqs[i];
-        set_irq_chip (irq, &comcas_gic_chip);
-        set_irq_chip_data (irq, 0);
-        set_irq_handler (irq, handle_level_irq);
+        irq_set_chip_and_handler(irq, &comcas_gic_chip, handle_level_irq);
+        irq_set_chip_data (irq, 0);
         set_irq_flags (irq, IRQF_VALID | IRQF_PROBE);
     }
 }
