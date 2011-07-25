@@ -125,8 +125,8 @@ int getcrtcpu_release (struct inode *inode, struct file *filp)
         cpunum &= 0x0F;                             \
     })
 
-static int
-getcrtcpu_chr_ioctl (struct inode *inode, struct file *file, unsigned int code, unsigned long buffer)
+static long
+getcrtcpu_chr_ioctl (struct file *file, unsigned int code, unsigned long buffer)
 {
     int                         ret = 0;
     char                        cpuid;
@@ -150,7 +150,7 @@ struct file_operations getcrtcpu_fops =
     .owner =                THIS_MODULE,
     .open =                 getcrtcpu_open,
     .release =              getcrtcpu_release,
-    .ioctl =                getcrtcpu_chr_ioctl,
+    .unlocked_ioctl =       getcrtcpu_chr_ioctl,
 };
 
 module_init(getcrtcpu_init);
