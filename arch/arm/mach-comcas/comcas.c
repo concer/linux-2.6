@@ -68,11 +68,7 @@ static inline unsigned long comcas_get_gic_irq_mask (int irq)
 
 }
 
-static void comcas_gic_ack_irq (struct irq_data *d)
-{
-}
-
-void comcas_gic_mask_irq (struct irq_data *d)
+void comcas_gic_mask_ack_irq (struct irq_data *d)
 {
     unsigned long       mask, val;
 
@@ -110,8 +106,7 @@ static int comcas_gic_set_cpu (unsigned int irq, const struct cpumask *dest)
 static struct irq_chip comcas_gic_chip =
 {
     .name       = "COMCAS_GIC",
-    .irq_ack	= comcas_gic_ack_irq,
-    .irq_mask	= comcas_gic_mask_irq,
+    .irq_mask_ack = comcas_gic_mask_ack_irq,
     .irq_unmask	= comcas_gic_unmask_irq,
     #ifdef CONFIG_SMP
     .set_affinity   = comcas_gic_set_cpu,
