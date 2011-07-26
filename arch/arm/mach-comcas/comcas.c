@@ -127,7 +127,6 @@ static void __init comcas_gic_init (void)
     {
         irq = implemented_irqs[i];
         irq_set_chip_and_handler(irq, &comcas_gic_chip, handle_level_irq);
-        irq_set_chip_data (irq, 0);
         set_irq_flags (irq, IRQF_VALID | IRQF_PROBE);
     }
 }
