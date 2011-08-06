@@ -6,6 +6,7 @@
 #include <linux/platform_device.h>
 #include <linux/sysdev.h>
 #include <mach/hardware.h>
+#include <asm/clkdev.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <linux/irq.h>
@@ -14,6 +15,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 #include <mach/irqs.h>
+#include <mach/clkdev.h>
 
 #include "core.h"
 
@@ -148,8 +150,18 @@ static struct sys_timer comcas_timer =
     .init		= comcas_timer_init,
 };
 
+static struct clk dummy_apb_pclk;
+
+static struct clk_lookup lookups[] = {
+	{	/* AMBA bus clock */
+		.con_id		= "apb_pclk",
+		.clk		= &dummy_apb_pclk,
+	}
+};
+
 static void __init comcas_init (void)
 {
+	clkdev_add_table(lookups, ARRAY_SIZE(lookups));
 }
 
 MACHINE_START(COMCAS, "COMCAS")
