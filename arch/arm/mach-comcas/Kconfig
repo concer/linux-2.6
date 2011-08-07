@@ -1,0 +1,12 @@
+menu "COMCAS platform type"
+	depends on ARCH_COMCAS
+
+config MACH_COMCAS
+	bool "Support SMP QEMU virtual platform version 1."
+	default y
+	select ARM_GIC
+	select SERIAL_CORE
+	help
+		Include support for SMP QEMU virtual platform version 1.
+
+endmenu
