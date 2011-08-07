@@ -157,12 +157,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
     unsigned int cpu = smp_processor_id();
     int i;
 
-    /* sanity check */
-    if(ncores == 0) {
-        printk (KERN_ERR "Comcas: strange CM count of 0? Default to 1\n");
-        ncores = 1;
-    }
-
     if(ncores > NR_CPUS) {
         printk (KERN_WARNING "Comcas: no. of cores (%d) greater than configured "
             "maximum of %d - clipping\n", ncores, NR_CPUS);
