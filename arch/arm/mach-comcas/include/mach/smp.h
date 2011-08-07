@@ -6,11 +6,11 @@
 /*
  * We use IRQ1 as the IPI
  */
-static inline void smp_cross_call(const struct cpumask *callmap)
+static inline void smp_cross_call(const struct cpumask *callmap, int ipi)
 {
-    extern void comcas_raise_softirq(const struct cpumask *cpumask);
+	extern void comcas_raise_softirq(const struct cpumask *cpumask, int ipi);
 
-    comcas_raise_softirq(callmap);
+    comcas_raise_softirq(callmap, ipi);
 }
 
 /*

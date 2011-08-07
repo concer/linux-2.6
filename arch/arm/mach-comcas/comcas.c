@@ -164,7 +164,7 @@ MACHINE_START(COMCAS, "COMCAS")
 	.init_machine	= comcas_init,
 MACHINE_END
 
-void comcas_raise_softirq (const struct cpumask *cpumask)
+	void comcas_raise_softirq (const struct cpumask *cpumask, int ipi)
 {
     unsigned long map = *cpus_addr(*cpumask);
 
