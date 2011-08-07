@@ -1,8 +1,6 @@
 #ifndef ASMARM_ARCH_SMP_H
 #define ASMARM_ARCH_SMP_H
 
-#include <asm/smp_mpidr.h>
-
 /*
  * We use IRQ1 as the IPI
  */
