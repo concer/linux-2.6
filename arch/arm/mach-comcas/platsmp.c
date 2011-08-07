@@ -43,6 +43,19 @@ static unsigned int __init get_core_count (void)
 
 static DEFINE_SPINLOCK(boot_lock);
 
+/*
+ * Write pen_release in a way that is guaranteed to be visible to all
+ * observers, irrespective of whether they're taking part in coherency
+ * or not.  This is necessary for the hotplug code to work reliably.
+ */
+static void write_pen_release(int val)
+{
+	pen_release = val;
+	smp_wmb();
+	__cpuc_flush_dcache_area((void *)&pen_release, sizeof(pen_release));
+	outer_clean_range(__pa(&pen_release), __pa(&pen_release + 1));
+}
+
 void __cpuinit platform_secondary_init (unsigned int cpu)
 {
     /*
@@ -63,8 +76,7 @@ void __cpuinit platform_secondary_init (unsigned int cpu)
     * let the primary processor know we're out of the
     * pen, then head off into the C entry point
     */
-    pen_release = -1;
-    smp_wmb ();
+    write_pen_release(-1);
 
     /*
     * Synchronise with the boot thread.
