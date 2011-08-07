@@ -151,6 +151,13 @@ void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 {
     int i;
 
+    /*
+    * Initialise the present map, which describes the set of CPUs
+    * actually populated at the present time.
+    */
+    for(i = 0; i < max_cpus; i++)
+        cpu_set(i, cpu_present_map);
+
     scu_enable(scu_base_addr());
     /*
      * Write the address of secondary startup into the
