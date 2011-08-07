@@ -252,7 +252,7 @@ config ARCH_COMCAS
 	select ARM_AMBA
 	select ICST307
 	select GENERIC_TIME
-	select COMMON_CLKDEV
+	select CLKDEV_LOOKUP
 	select GENERIC_CLOCKEVENTS
 	help
 	  This enables support for COMCAS QEMU boards.

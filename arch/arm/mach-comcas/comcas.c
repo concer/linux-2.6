@@ -5,8 +5,8 @@
 #include <linux/init.h>
 #include <linux/platform_device.h>
 #include <linux/sysdev.h>
+#include <linux/clkdev.h>
 #include <mach/hardware.h>
-#include <asm/clkdev.h>
 #include <asm/io.h>
 #include <asm/irq.h>
 #include <linux/irq.h>
@@ -15,7 +15,6 @@
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 #include <mach/irqs.h>
-#include <mach/clkdev.h>
 
 #include "core.h"
 
