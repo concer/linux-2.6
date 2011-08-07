@@ -19,7 +19,7 @@
 #include <mach/hardware.h>
 #include <asm/io.h>
 #include <asm/mach-types.h>
-#include <asm/localtimer.h>
+#include <asm/smp_scu.h>
 
 #include <mach/board-comcas.h>
 #include <mach/scu.h>
@@ -134,25 +134,9 @@ void __init smp_init_cpus(void)
 		cpu_set(i, cpu_possible_map);
 }
 
-void __init smp_prepare_cpus(unsigned int max_cpus)
+void __init platform_smp_prepare_cpus(unsigned int max_cpus)
 {
-    unsigned int ncores = get_core_count();
-    unsigned int cpu = smp_processor_id();
     int i;
-
-    if(ncores > NR_CPUS) {
-        printk (KERN_WARNING "Comcas: no. of cores (%d) greater than configured "
-            "maximum of %d - clipping\n", ncores, NR_CPUS);
-        ncores = NR_CPUS;
-    }
-
-    smp_store_cpu_info(cpu);
-
-    /*
-    * are we trying to boot more cores than exist?
-    */
-    if(max_cpus > ncores)
-        max_cpus = ncores;
 
     /*
     * Initialise the present map, which describes the set of CPUs
@@ -161,16 +145,13 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
     for(i = 0; i < max_cpus; i++)
         cpu_set(i, cpu_present_map);
 
-    if(max_cpus > 1)
-    {
-        percpu_timer_setup ();
-	/*
-	 * Write the address of secondary startup into the
-	 * system-wide flags register. The BootMonitor waits
-	 * until it receives a soft interrupt, and then the
-	 * secondary CPU branches to this address.
-	 */
-	__raw_writel(virt_to_phys(comcas_secondary_startup),
-		__io_address(COMCAS_QEMU_ADDR_BASE) + 0x84);
-    }
+    scu_enable(scu_base_addr());
+    /*
+     * Write the address of secondary startup into the
+     * system-wide flags register. The BootMonitor waits
+     * until it receives a soft interrupt, and then the
+     * secondary CPU branches to this address.
+     */
+    __raw_writel(virt_to_phys(comcas_secondary_startup),
+	    __io_address(COMCAS_QEMU_ADDR_BASE) + 0x84);
 }
